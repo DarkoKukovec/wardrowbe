@@ -87,6 +87,7 @@ class TestWorkerHooks:
         ctx: dict = {}
 
         with (
+            patch("app.workers.worker.asyncio.to_thread", new_callable=AsyncMock) as mock_thread,
             patch("app.workers.worker.init_db", new_callable=AsyncMock) as mock_init,
             patch("app.workers.worker.AIService", return_value=mock_ai),
             patch(
@@ -95,6 +96,7 @@ class TestWorkerHooks:
         ):
             await startup(ctx)
 
+        mock_thread.assert_awaited_once()
         mock_init.assert_awaited_once_with(ctx)
         assert ctx["ai_service"] is mock_ai
         mock_ai.check_health.assert_awaited_once()
