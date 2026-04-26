@@ -1,6 +1,9 @@
+import asyncio
 import logging
 from datetime import UTC, datetime, timedelta
 
+from alembic import command as alembic_command
+from alembic.config import Config as AlembicConfig
 from arq import cron
 from sqlalchemy import update
 
@@ -24,6 +27,15 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 
 
+def _run_migrations() -> None:
+    try:
+        cfg = AlembicConfig("alembic.ini")
+        alembic_command.upgrade(cfg, "head")
+    except Exception:
+        logger.exception("Database migration failed — worker cannot start safely")
+        raise
+
+
 async def recover_stale_processing_items(ctx: dict) -> None:
     timeout = settings.ai_timeout * settings.ai_max_retries + 120
     cutoff = datetime.now(UTC) - timedelta(seconds=timeout)
@@ -43,6 +55,9 @@ async def recover_stale_processing_items(ctx: dict) -> None:
 
 async def startup(ctx: dict) -> None:
     logger.info("Worker starting up...")
+    logger.info("Running database migrations...")
+    await asyncio.to_thread(_run_migrations)
+    logger.info("Database migrations complete.")
     await init_db(ctx)
     ctx["ai_service"] = AIService()
     health = await ctx["ai_service"].check_health()

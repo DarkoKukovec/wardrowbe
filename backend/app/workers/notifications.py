@@ -1,6 +1,8 @@
 import logging
 import os
+import uuid as uuid_lib
 from datetime import UTC, datetime, timedelta
+from uuid import UUID
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import and_, select
@@ -35,7 +37,7 @@ async def reset_schedule_trigger(ctx: dict, schedule_id: str) -> None:
     try:
         db = get_db_session(ctx)
         try:
-            result = await db.execute(select(Schedule).where(Schedule.id == schedule_id))
+            result = await db.execute(select(Schedule).where(Schedule.id == UUID(schedule_id)))
             sched = result.scalar_one_or_none()
             if sched:
                 sched.last_triggered_at = None
@@ -57,7 +59,9 @@ async def send_notification(ctx: dict, user_id: str, outfit_id: str):
         app_url = os.getenv("APP_URL", "http://localhost:3000")
         dispatcher = NotificationDispatcher(db, app_url)
 
-        results = await dispatcher.send_outfit_notification(user_id=user_id, outfit_id=outfit_id)
+        results = await dispatcher.send_outfit_notification(
+            user_id=UUID(user_id), outfit_id=UUID(outfit_id)
+        )
 
         await db.commit()
 
@@ -159,7 +163,7 @@ async def process_scheduled_notification(ctx: dict, schedule_id: str):
 
     db = get_db_session(ctx)
     try:
-        result = await db.execute(select(Schedule).where(Schedule.id == schedule_id))
+        result = await db.execute(select(Schedule).where(Schedule.id == UUID(schedule_id)))
         schedule = result.scalar_one_or_none()
         if not schedule:
             logger.warning(f"Schedule {schedule_id} not found, skipping")
@@ -221,8 +225,8 @@ async def process_scheduled_notification(ctx: dict, schedule_id: str):
         app_url = os.getenv("APP_URL", "http://localhost:3000")
         dispatcher = NotificationDispatcher(db, app_url)
         await dispatcher.send_outfit_notification(
-            user_id=str(user.id),
-            outfit_id=str(outfit.id),
+            user_id=user.id,
+            outfit_id=outfit.id,
             for_tomorrow=is_for_tomorrow,
         )
 
@@ -363,9 +367,9 @@ async def _check_wash_reminders_inner(ctx: dict):
             logger.info("No items need washing")
             return {"notified": 0}
 
-        user_items: dict[str, list] = {}
+        user_items: dict[uuid_lib.UUID, list[ClothingItem]] = {}
         for item in dirty_items:
-            uid = str(item.user_id)
+            uid = item.user_id
             if uid not in user_items:
                 user_items[uid] = []
             user_items[uid].append(item)
