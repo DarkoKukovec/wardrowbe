@@ -283,10 +283,10 @@ export default function WardrobePage() {
   ].filter(Boolean).length;
 
   // Fetch own items or a family member's items depending on selection
-  const ownItemsQuery = useItems(isViewingOwnWardrobe ? filters : {}, page, 20);
+  const ownItemsQuery = useItems(filters, page, 20, isViewingOwnWardrobe);
   const memberItemsQuery = useFamilyMemberItems(
     selectedMemberId || '',
-    !isViewingOwnWardrobe ? filters : {},
+    filters,
     page,
     20,
   );

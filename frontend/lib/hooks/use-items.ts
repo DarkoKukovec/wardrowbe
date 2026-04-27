@@ -14,7 +14,14 @@ function useSetTokenIfAvailable() {
   }
 }
 
-export function useItems(filters: ItemFilter = {}, page = 1, pageSize = 20) {
+// Poll more frequently when items are processing (every 5 seconds), otherwise every 30 seconds
+function getItemsRefetchInterval(query: { state: { data: unknown } }): number {
+  const data = query.state.data as ItemListResponse | undefined;
+  const hasProcessing = data?.items?.some((item) => item.status === 'processing');
+  return hasProcessing ? 5000 : 30000;
+}
+
+export function useItems(filters: ItemFilter = {}, page = 1, pageSize = 20, enabled = true) {
   const { data: session, status } = useSession();
   useSetTokenIfAvailable();
 
@@ -37,13 +44,8 @@ export function useItems(filters: ItemFilter = {}, page = 1, pageSize = 20) {
 
       return api.get<ItemListResponse>('/items', { params });
     },
-    enabled: status !== 'loading',
-    // Poll more frequently when items are processing (every 5 seconds), otherwise every 30 seconds
-    refetchInterval: (query) => {
-      const data = query.state.data as ItemListResponse | undefined;
-      const hasProcessing = data?.items?.some((item) => item.status === 'processing');
-      return hasProcessing ? 5000 : 30000;
-    },
+    enabled: enabled && status !== 'loading',
+    refetchInterval: getItemsRefetchInterval,
   });
 }
 
@@ -70,11 +72,7 @@ export function useFamilyMemberItems(memberId: string, filters: ItemFilter = {},
       return api.get<ItemListResponse>(`/families/me/members/${memberId}/items`, { params });
     },
     enabled: !!memberId && status !== 'loading',
-    refetchInterval: (query) => {
-      const data = query.state.data as ItemListResponse | undefined;
-      const hasProcessing = data?.items?.some((item) => item.status === 'processing');
-      return hasProcessing ? 5000 : 30000;
-    },
+    refetchInterval: getItemsRefetchInterval,
   });
 }
 
