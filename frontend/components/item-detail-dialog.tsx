@@ -71,6 +71,63 @@ interface ItemDetailDialogProps {
 
 // Images now use signed URLs from backend (item.image_url, item.thumbnail_url)
 
+interface TagInputProps {
+  values: string[];
+  onChange: (values: string[]) => void;
+  placeholder?: string;
+}
+
+function TagInput({ values, onChange, placeholder }: TagInputProps) {
+  const [inputValue, setInputValue] = useState('');
+
+  const addTag = () => {
+    const trimmed = inputValue.trim();
+    if (trimmed && !values.includes(trimmed)) {
+      onChange([...values, trimmed]);
+    }
+    setInputValue('');
+  };
+
+  return (
+    <div className="space-y-1.5">
+      {values.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {values.map((v) => (
+            <Badge key={v} variant="secondary" className="text-xs gap-1 pr-1">
+              {v}
+              <button
+                type="button"
+                onClick={() => onChange(values.filter((x) => x !== v))}
+                className="ml-0.5 hover:text-destructive"
+                aria-label={`Remove ${v}`}
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </Badge>
+          ))}
+        </div>
+      )}
+      <div className="flex gap-2">
+        <Input
+          value={inputValue}
+          onChange={(e) => setInputValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              addTag();
+            }
+          }}
+          placeholder={placeholder || 'Type and press Enter to add…'}
+          className="h-8 text-xs"
+        />
+        <Button type="button" variant="outline" size="sm" onClick={addTag} className="h-8 px-2">
+          <Plus className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 export function ItemDetailDialog({ item, open, onOpenChange }: ItemDetailDialogProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -85,6 +142,15 @@ export function ItemDetailDialog({ item, open, onOpenChange }: ItemDetailDialogP
     notes: '',
     favorite: false,
     wash_interval: undefined as number | undefined,
+    tags: {
+      colors: [] as string[],
+      pattern: '',
+      material: '',
+      style: [] as string[],
+      season: [] as string[],
+      formality: '',
+      fit: '',
+    },
   });
   const [showWashHistory, setShowWashHistory] = useState(false);
   const [showWearHistory, setShowWearHistory] = useState(false);
@@ -115,6 +181,15 @@ export function ItemDetailDialog({ item, open, onOpenChange }: ItemDetailDialogP
         notes: item.notes || '',
         favorite: item.favorite,
         wash_interval: item.wash_interval ?? undefined,
+        tags: {
+          colors: item.tags?.colors || [],
+          pattern: item.tags?.pattern || '',
+          material: item.tags?.material || '',
+          style: item.tags?.style || [],
+          season: item.tags?.season || [],
+          formality: item.tags?.formality || '',
+          fit: item.tags?.fit || '',
+        },
       });
       setIsEditing(false);
       setActiveImageIndex(0);
@@ -136,6 +211,17 @@ export function ItemDetailDialog({ item, open, onOpenChange }: ItemDetailDialogP
           notes: editForm.notes || undefined,
           favorite: editForm.favorite,
           wash_interval: editForm.wash_interval,
+          tags: {
+            // Preserve existing AI-generated extras not covered by the edit form
+            ...item.tags,
+            colors: editForm.tags.colors,
+            pattern: editForm.tags.pattern || undefined,
+            material: editForm.tags.material || undefined,
+            style: editForm.tags.style,
+            season: editForm.tags.season,
+            formality: editForm.tags.formality || undefined,
+            fit: editForm.tags.fit || undefined,
+          },
         },
       });
       setIsEditing(false);
@@ -532,6 +618,76 @@ export function ItemDetailDialog({ item, open, onOpenChange }: ItemDetailDialogP
                       rows={3}
                     />
                   </div>
+                  {/* Tags */}
+                  <Collapsible>
+                    <CollapsibleTrigger className="flex items-center gap-1 text-sm font-medium w-full">
+                      <Sparkles className="h-4 w-4 text-primary" />
+                      Tags
+                      <ChevronDown className="h-3.5 w-3.5 ml-auto transition-transform [[data-state=open]_&]:rotate-180" />
+                    </CollapsibleTrigger>
+                    <CollapsibleContent className="space-y-3 pt-2">
+                      <div className="space-y-1.5">
+                        <Label className="text-xs">Colors</Label>
+                        <TagInput
+                          values={editForm.tags.colors}
+                          onChange={(colors) => setEditForm({ ...editForm, tags: { ...editForm.tags, colors } })}
+                          placeholder="e.g. navy, white…"
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label className="text-xs">Pattern</Label>
+                        <Input
+                          value={editForm.tags.pattern}
+                          onChange={(e) => setEditForm({ ...editForm, tags: { ...editForm.tags, pattern: e.target.value } })}
+                          placeholder="e.g. solid, striped, plaid…"
+                          className="h-8 text-xs"
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label className="text-xs">Material</Label>
+                        <Input
+                          value={editForm.tags.material}
+                          onChange={(e) => setEditForm({ ...editForm, tags: { ...editForm.tags, material: e.target.value } })}
+                          placeholder="e.g. cotton, denim, wool…"
+                          className="h-8 text-xs"
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label className="text-xs">Style</Label>
+                        <TagInput
+                          values={editForm.tags.style}
+                          onChange={(style) => setEditForm({ ...editForm, tags: { ...editForm.tags, style } })}
+                          placeholder="e.g. casual, streetwear…"
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label className="text-xs">Season</Label>
+                        <TagInput
+                          values={editForm.tags.season}
+                          onChange={(season) => setEditForm({ ...editForm, tags: { ...editForm.tags, season } })}
+                          placeholder="e.g. summer, winter…"
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label className="text-xs">Formality</Label>
+                        <Input
+                          value={editForm.tags.formality}
+                          onChange={(e) => setEditForm({ ...editForm, tags: { ...editForm.tags, formality: e.target.value } })}
+                          placeholder="e.g. casual, formal…"
+                          className="h-8 text-xs"
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label className="text-xs">Fit</Label>
+                        <Input
+                          value={editForm.tags.fit}
+                          onChange={(e) => setEditForm({ ...editForm, tags: { ...editForm.tags, fit: e.target.value } })}
+                          placeholder="e.g. slim, regular, relaxed…"
+                          className="h-8 text-xs"
+                        />
+                      </div>
+                    </CollapsibleContent>
+                  </Collapsible>
                   <div className="space-y-2">
                     <Label>Wash Interval (wears)</Label>
                     <Input
