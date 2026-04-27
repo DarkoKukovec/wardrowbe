@@ -1,4 +1,3 @@
-# Production Docker Compose for Raspberry Pi (ARM64)
 # Production Docker Compose
 
 services:
