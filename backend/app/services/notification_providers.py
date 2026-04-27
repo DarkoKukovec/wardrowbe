@@ -1,9 +1,9 @@
 import logging
-import os
 from dataclasses import dataclass, field
 
 import httpx
 
+from app.config import get_settings
 from app.schemas.notification import EmailConfig, ExpoPushConfig, MattermostConfig, NtfyConfig
 
 logger = logging.getLogger(__name__)
@@ -170,14 +170,15 @@ class EmailMessage:
 
 class EmailProvider:
     def __init__(self, config: EmailConfig):
+        settings = get_settings()
         self.to_address = config.address
-        self.smtp_host = os.getenv("SMTP_HOST")
-        self.smtp_port = int(os.getenv("SMTP_PORT", "587"))
-        self.smtp_user = os.getenv("SMTP_USER")
-        self.smtp_password = os.getenv("SMTP_PASSWORD")
-        self.smtp_use_tls = os.getenv("SMTP_USE_TLS", "true").lower() == "true"
-        self.from_name = os.getenv("SMTP_FROM_NAME", "Wardrowbe")
-        self.from_email = os.getenv("SMTP_FROM_EMAIL", self.smtp_user)
+        self.smtp_host = settings.smtp_host
+        self.smtp_port = settings.smtp_port
+        self.smtp_user = settings.smtp_user
+        self.smtp_password = settings.smtp_password
+        self.smtp_use_tls = settings.smtp_use_tls
+        self.from_name = settings.smtp_from_name
+        self.from_email = settings.smtp_from_email or settings.smtp_user
 
     def is_configured(self) -> bool:
         return bool(self.smtp_host and self.smtp_user)

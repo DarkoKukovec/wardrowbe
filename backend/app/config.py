@@ -63,6 +63,9 @@ class Settings(BaseSettings):
     smtp_port: int = 587
     smtp_user: str | None = None
     smtp_password: str | None = None
+    smtp_use_tls: bool = True
+    smtp_from_name: str = "Wardrowbe"
+    smtp_from_email: str | None = None
     # Storage
     storage_path: str = Field(default="/data/wardrobe")
     max_upload_size_mb: int = Field(default=10)
