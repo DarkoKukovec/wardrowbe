@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useDropzone } from 'react-dropzone';
-import { Upload, X, Loader2, CheckCircle2, AlertCircle, Image as ImageIcon } from 'lucide-react';
+import { Upload, X, Loader2, CheckCircle2, AlertCircle, Image as ImageIcon, Camera } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   Dialog,
@@ -67,6 +67,8 @@ export function AddItemDialog({ open, onOpenChange }: AddItemDialogProps) {
   // Track blob URLs for cleanup on unmount
   const blobUrlsRef = useRef<Set<string>>(new Set());
 
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+
   const createItem = useCreateItem();
   const bulkCreateItems = useBulkCreateItems();
 
@@ -78,18 +80,33 @@ export function AddItemDialog({ open, onOpenChange }: AddItemDialogProps) {
     };
   }, []);
 
+  // Shared helper to load a single image file into state
+  const loadSingleFile = useCallback((file: File) => {
+    setFile(file);
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setPreview(reader.result as string);
+    };
+    reader.readAsDataURL(file);
+  }, []);
+
   // Single file drop handler
   const onDropSingle = useCallback((acceptedFiles: File[]) => {
     const file = acceptedFiles[0];
     if (file) {
-      setFile(file);
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setPreview(reader.result as string);
-      };
-      reader.readAsDataURL(file);
+      loadSingleFile(file);
     }
-  }, []);
+  }, [loadSingleFile]);
+
+  // Camera capture handler
+  const onCameraCapture = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      loadSingleFile(file);
+    }
+    // Reset input so the same photo can be re-selected if needed
+    e.target.value = '';
+  }, [loadSingleFile]);
 
   // Bulk file drop handler
   const onDropBulk = useCallback((acceptedFiles: File[]) => {
@@ -251,24 +268,46 @@ export function AddItemDialog({ open, onOpenChange }: AddItemDialogProps) {
           <TabsContent value="single" className="space-y-4">
             <form onSubmit={handleSingleSubmit} className="space-y-4">
               {!preview ? (
-                <div
-                  {...getSingleRootProps()}
-                  className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${
-                    isSingleDragActive
-                      ? 'border-primary bg-primary/5'
-                      : 'border-muted-foreground/25 hover:border-primary/50'
-                  }`}
-                >
-                  <input {...getSingleInputProps()} />
-                  <Upload className="mx-auto h-12 w-12 text-muted-foreground" />
-                  <p className="mt-2 text-sm text-muted-foreground">
-                    {isSingleDragActive
-                      ? 'Drop the image here...'
-                      : 'Drag & drop an image, or tap to select'}
-                  </p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    JPEG, PNG, WebP, or HEIC
-                  </p>
+                <div className="space-y-2">
+                  <div
+                    {...getSingleRootProps()}
+                    className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${
+                      isSingleDragActive
+                        ? 'border-primary bg-primary/5'
+                        : 'border-muted-foreground/25 hover:border-primary/50'
+                    }`}
+                  >
+                    <input {...getSingleInputProps()} />
+                    <Upload className="mx-auto h-12 w-12 text-muted-foreground" />
+                    <p className="mt-2 text-sm text-muted-foreground">
+                      {isSingleDragActive
+                        ? 'Drop the image here...'
+                        : 'Drag & drop an image, or tap to select'}
+                    </p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      JPEG, PNG, WebP, or HEIC
+                    </p>
+                  </div>
+
+                  {/* Hidden camera input for mobile */}
+                  <input
+                    ref={cameraInputRef}
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    className="hidden"
+                    onChange={onCameraCapture}
+                  />
+
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full sm:hidden"
+                    onClick={() => cameraInputRef.current?.click()}
+                  >
+                    <Camera className="mr-2 h-4 w-4" />
+                    Take Photo
+                  </Button>
                 </div>
               ) : (
                 <div className="relative">
