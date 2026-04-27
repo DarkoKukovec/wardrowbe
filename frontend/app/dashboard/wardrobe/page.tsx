@@ -23,11 +23,13 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { AddItemDialog } from '@/components/add-item-dialog';
 import { ItemDetailDialog } from '@/components/item-detail-dialog';
 import { BulkActionToolbar, BulkSelection } from '@/components/bulk-action-toolbar';
-import { useItems, useItem, useItemTypes, useReanalyzeItem, useBulkDeleteItems, useBulkReanalyzeItems, BulkOperationParams } from '@/lib/hooks/use-items';
+import { useItems, useFamilyMemberItems, useItem, useItemTypes, useReanalyzeItem, useBulkDeleteItems, useBulkReanalyzeItems, BulkOperationParams } from '@/lib/hooks/use-items';
 import { useUserProfile } from '@/lib/hooks/use-user';
+import { useFamily } from '@/lib/hooks/use-family';
 import { CLOTHING_TYPES, CLOTHING_COLORS, Item } from '@/lib/types';
 import { toast } from 'sonner';
 import { formatWornAgo, getWornAgoColorClass } from '@/lib/utils';
@@ -221,8 +223,10 @@ export default function WardrobePage() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const { data: userProfile } = useUserProfile();
+  const { data: family } = useFamily();
   const userTimezone = userProfile?.timezone || 'UTC';
   const [addDialogOpen, setAddDialogOpen] = useState(false);
+  const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null);
   const [selection, setSelection] = useState<BulkSelection>({
     mode: 'none',
     selectedIds: new Set(),
@@ -237,6 +241,11 @@ export default function WardrobePage() {
   const [showFilters, setShowFilters] = useState(false);
   const [page, setPage] = useState(1);
 
+  // Determine if we're viewing another member's wardrobe (read-only)
+  const isViewingOwnWardrobe = !selectedMemberId;
+  const selectedMember = family?.members.find((m) => m.id === selectedMemberId) || null;
+  const otherMembers = family?.members.filter((m) => m.id !== userProfile?.id) || [];
+
   // Open item detail dialog from URL param (e.g. ?item=uuid from outfit pages)
   useEffect(() => {
     const itemParam = searchParams.get('item');
@@ -244,6 +253,16 @@ export default function WardrobePage() {
       setDetailItemId(itemParam);
     }
   }, [searchParams]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Reset page and selection when switching members
+  useEffect(() => {
+    setPage(1);
+    setSelection({ mode: 'none', selectedIds: new Set(), excludedIds: new Set() });
+    setSearch('');
+    setTypeFilter('all');
+    setNeedsWash(undefined);
+    setFavoriteFilter(undefined);
+  }, [selectedMemberId]);
 
   const sortOption = SORT_OPTIONS[sortIndex];
 
@@ -263,8 +282,17 @@ export default function WardrobePage() {
     typeFilter !== 'all',
   ].filter(Boolean).length;
 
-  // Fetch items with automatic polling (faster when items are processing)
-  const { data, isLoading, error } = useItems(filters, page, 20);
+  // Fetch own items or a family member's items depending on selection
+  const ownItemsQuery = useItems(isViewingOwnWardrobe ? filters : {}, page, 20);
+  const memberItemsQuery = useFamilyMemberItems(
+    selectedMemberId || '',
+    !isViewingOwnWardrobe ? filters : {},
+    page,
+    20,
+  );
+
+  const { data, isLoading, error } = isViewingOwnWardrobe ? ownItemsQuery : memberItemsQuery;
+
   const { data: itemTypes } = useItemTypes();
   const reanalyze = useReanalyzeItem();
   const bulkDelete = useBulkDeleteItems();
@@ -393,13 +421,19 @@ export default function WardrobePage() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
           <div className="flex items-center justify-between sm:justify-start gap-3">
-            <h1 className="text-2xl font-bold tracking-tight">My Wardrobe</h1>
-            <Button onClick={() => setAddDialogOpen(true)} className="sm:hidden" size="sm">
-              <Plus className="h-4 w-4" />
-            </Button>
+            <h1 className="text-2xl font-bold tracking-tight">
+              {isViewingOwnWardrobe
+                ? 'My Wardrobe'
+                : `${selectedMember?.display_name ?? 'Member'}'s Wardrobe`}
+            </h1>
+            {isViewingOwnWardrobe && (
+              <Button onClick={() => setAddDialogOpen(true)} className="sm:hidden" size="sm">
+                <Plus className="h-4 w-4" />
+              </Button>
+            )}
           </div>
           <p className="text-sm text-muted-foreground">
-            {total} item{total !== 1 ? 's' : ''} in your wardrobe
+            {total} item{total !== 1 ? 's' : ''} in {isViewingOwnWardrobe ? 'your' : `${selectedMember?.display_name ?? 'their'}'s`} wardrobe
           </p>
           {(processingCount > 0 || errorCount > 0) && (
             <div className="flex items-center gap-2 mt-2">
@@ -418,10 +452,68 @@ export default function WardrobePage() {
             </div>
           )}
         </div>
-        <Button onClick={() => setAddDialogOpen(true)} className="hidden sm:flex">
-          <Plus className="mr-2 h-4 w-4" />
-          Add Item
-        </Button>
+        <div className="flex items-center gap-2">
+          {otherMembers.length > 0 && (
+            <div className="flex items-center gap-1 flex-wrap">
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={() => setSelectedMemberId(null)}
+                      className={`rounded-full border-2 transition-all ${
+                        isViewingOwnWardrobe
+                          ? 'border-primary ring-2 ring-primary ring-offset-1'
+                          : 'border-transparent opacity-60 hover:opacity-100'
+                      }`}
+                    >
+                      <Avatar className="h-8 w-8">
+                        <AvatarImage src={userProfile?.avatar_url || ''} alt={userProfile?.display_name || ''} />
+                        <AvatarFallback className="text-xs">
+                          {(userProfile?.display_name || 'Me').slice(0, 2).toUpperCase()}
+                        </AvatarFallback>
+                      </Avatar>
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>My Wardrobe</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+              {otherMembers.map((member) => (
+                <TooltipProvider key={member.id}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        onClick={() => setSelectedMemberId(member.id)}
+                        className={`rounded-full border-2 transition-all ${
+                          selectedMemberId === member.id
+                            ? 'border-primary ring-2 ring-primary ring-offset-1'
+                            : 'border-transparent opacity-60 hover:opacity-100'
+                        }`}
+                      >
+                        <Avatar className="h-8 w-8">
+                          <AvatarImage src={member.avatar_url || ''} alt={member.display_name} />
+                          <AvatarFallback className="text-xs">
+                            {member.display_name.slice(0, 2).toUpperCase()}
+                          </AvatarFallback>
+                        </Avatar>
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p>{member.display_name}</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              ))}
+            </div>
+          )}
+          {isViewingOwnWardrobe && (
+            <Button onClick={() => setAddDialogOpen(true)} className="hidden sm:flex">
+              <Plus className="mr-2 h-4 w-4" />
+              Add Item
+            </Button>
+          )}
+        </div>
       </div>
 
       <div className="space-y-3">
@@ -582,8 +674,17 @@ export default function WardrobePage() {
               Clear Filters
             </Button>
           </div>
-        ) : (
+        ) : isViewingOwnWardrobe ? (
           <EmptyWardrobe onAddClick={() => setAddDialogOpen(true)} />
+        ) : (
+          <div className="flex flex-col items-center justify-center py-16 px-4 text-center">
+            <div className="rounded-full bg-muted p-6 mb-4">
+              <Grid3X3 className="h-12 w-12 text-muted-foreground" />
+            </div>
+            <h3 className="text-lg font-semibold mb-2">
+              {selectedMember?.display_name ?? 'This member'} has no items yet
+            </h3>
+          </div>
         )
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 pb-20">
@@ -596,9 +697,9 @@ export default function WardrobePage() {
               <ItemCard
                 key={item.id}
                 item={item}
-                selected={isSelected}
-                onSelect={handleSelect}
-                onRetry={handleRetry}
+                selected={isViewingOwnWardrobe && isSelected}
+                onSelect={isViewingOwnWardrobe ? handleSelect : () => {}}
+                onRetry={isViewingOwnWardrobe ? handleRetry : undefined}
                 onClick={() => setDetailItemId(item.id)}
                 userTimezone={userTimezone}
               />
@@ -607,20 +708,48 @@ export default function WardrobePage() {
         </div>
       )}
 
-      <BulkActionToolbar
-        selection={selection}
-        totalItems={total}
-        pageItems={items.length}
-        onSelectAll={handleSelectAll}
-        onClear={handleClearSelection}
-        onDelete={handleBulkDelete}
-        onReanalyze={handleBulkReanalyze}
-        isDeleting={bulkDelete.isPending}
-        isReanalyzing={bulkReanalyze.isPending}
-        page={page}
-        pageSize={20}
-        onPageChange={handlePageChange}
-      />
+      {isViewingOwnWardrobe && (
+        <BulkActionToolbar
+          selection={selection}
+          totalItems={total}
+          pageItems={items.length}
+          onSelectAll={handleSelectAll}
+          onClear={handleClearSelection}
+          onDelete={handleBulkDelete}
+          onReanalyze={handleBulkReanalyze}
+          isDeleting={bulkDelete.isPending}
+          isReanalyzing={bulkReanalyze.isPending}
+          page={page}
+          pageSize={20}
+          onPageChange={handlePageChange}
+        />
+      )}
+
+      {!isViewingOwnWardrobe && total > 20 && (
+        <div className="flex justify-center py-4">
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={page <= 1}
+              onClick={() => setPage((p) => p - 1)}
+            >
+              Previous
+            </Button>
+            <span className="text-sm text-muted-foreground">
+              Page {page}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!data?.has_more}
+              onClick={() => setPage((p) => p + 1)}
+            >
+              Next
+            </Button>
+          </div>
+        </div>
+      )}
 
       <AddItemDialog open={addDialogOpen} onOpenChange={setAddDialogOpen} />
       <ItemDetailDialog

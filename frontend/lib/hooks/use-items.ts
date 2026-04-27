@@ -47,6 +47,37 @@ export function useItems(filters: ItemFilter = {}, page = 1, pageSize = 20) {
   });
 }
 
+export function useFamilyMemberItems(memberId: string, filters: ItemFilter = {}, page = 1, pageSize = 20) {
+  const { status } = useSession();
+  useSetTokenIfAvailable();
+
+  return useQuery({
+    queryKey: ['family-member-items', memberId, filters, page, pageSize],
+    queryFn: async () => {
+      const params: Record<string, string> = {
+        page: String(page),
+        page_size: String(pageSize),
+      };
+      if (filters.type) params.type = filters.type;
+      if (filters.colors?.length) params.colors = filters.colors.join(',');
+      if (filters.search) params.search = filters.search;
+      if (filters.favorite !== undefined) params.favorite = String(filters.favorite);
+      if (filters.needs_wash !== undefined) params.needs_wash = String(filters.needs_wash);
+      if (filters.is_archived !== undefined) params.is_archived = String(filters.is_archived);
+      if (filters.sort_by) params.sort_by = filters.sort_by;
+      if (filters.sort_order) params.sort_order = filters.sort_order;
+
+      return api.get<ItemListResponse>(`/families/me/members/${memberId}/items`, { params });
+    },
+    enabled: !!memberId && status !== 'loading',
+    refetchInterval: (query) => {
+      const data = query.state.data as ItemListResponse | undefined;
+      const hasProcessing = data?.items?.some((item) => item.status === 'processing');
+      return hasProcessing ? 5000 : 30000;
+    },
+  });
+}
+
 export function useItem(itemId: string) {
   const { status } = useSession();
   useSetTokenIfAvailable();

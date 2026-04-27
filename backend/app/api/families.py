@@ -3,7 +3,7 @@ import os
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -24,8 +24,10 @@ from app.schemas.family import (
     PendingInvite,
     UpdateMemberRoleRequest,
 )
+from app.schemas.item import ItemFilter, ItemListResponse, ItemResponse
 from app.schemas.notification import EmailConfig
 from app.services.family_service import FamilyService
+from app.services.item_service import ItemService
 from app.services.notification_providers import EmailProvider, build_family_invite_email
 from app.utils.auth import get_current_user
 
@@ -442,3 +444,76 @@ async def remove_member(
         )
 
     await db.commit()
+
+
+@router.get("/me/members/{member_id}/items", response_model=ItemListResponse)
+async def get_family_member_items(
+    member_id: UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    type: str | None = None,
+    subtype: str | None = None,
+    colors: str | None = None,
+    item_status: str | None = Query(None, alias="status"),
+    favorite: bool | None = None,
+    needs_wash: bool | None = None,
+    is_archived: bool = False,
+    search: str | None = None,
+    sort_by: str | None = None,
+    sort_order: str = "desc",
+) -> ItemListResponse:
+    if current_user.family_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="You are not in a family",
+        )
+
+    family_service = FamilyService(db)
+    family = await family_service.get_user_family(current_user)
+
+    if family is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Family not found",
+        )
+
+    # Verify the requested member belongs to the same family
+    member = next((m for m in family.members if m.id == member_id and m.is_active), None)
+    if member is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Member not found in your family",
+        )
+
+    color_list = colors.split(",") if colors else None
+
+    filters = ItemFilter(
+        type=type,
+        subtype=subtype,
+        colors=color_list,
+        status=item_status,
+        favorite=favorite,
+        needs_wash=needs_wash,
+        is_archived=is_archived,
+        search=search,
+        sort_by=sort_by,
+        sort_order=sort_order,
+    )
+
+    item_service = ItemService(db)
+    items, total = await item_service.get_list(
+        user_id=member_id,
+        filters=filters,
+        page=page,
+        page_size=page_size,
+    )
+
+    return ItemListResponse(
+        items=[ItemResponse.model_validate(item) for item in items],
+        total=total,
+        page=page,
+        page_size=page_size,
+        has_more=(page * page_size) < total,
+    )
