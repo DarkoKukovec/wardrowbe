@@ -15,6 +15,7 @@ import {
   Users,
   Bell,
   HeartHandshake,
+  WashingMachine,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -26,6 +27,7 @@ const navigation = [
   { name: 'Pairings', href: '/dashboard/pairings', icon: Layers },
   { name: 'History', href: '/dashboard/history', icon: History },
   { name: 'Family Feed', href: '/dashboard/family/feed', icon: HeartHandshake },
+  { name: 'Washing', href: '/dashboard/washing', icon: WashingMachine },
   { name: 'Analytics', href: '/dashboard/analytics', icon: BarChart3 },
   { name: 'AI Learning', href: '/dashboard/learning', icon: Brain },
 ];

@@ -89,3 +89,15 @@ class UpdateMemberRoleRequest(BaseModel):
 
 class MessageResponse(BaseModel):
     message: str
+
+
+class MemberWashingItems(BaseModel):
+    member_id: UUID
+    member_name: str
+    member_avatar_url: str | None = None
+    items: list
+
+
+class FamilyWashingResponse(BaseModel):
+    members: list[MemberWashingItems]
+    total: int
