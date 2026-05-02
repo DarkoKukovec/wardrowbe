@@ -1,5 +1,6 @@
 from datetime import date, datetime
 from decimal import Decimal
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
@@ -280,9 +281,14 @@ class EnhancePhotoResponse(BaseModel):
 
 
 class ApplyPhotoRequest(BaseModel):
-    """Request to apply a previously generated temp image as the item's main photo."""
+    """Request to apply a previously generated temp image.
+
+    ``action`` controls whether the temp image replaces the item's main photo
+    (``replace``) or is appended as an additional image (``add``).
+    """
 
     temp_path: str
+    action: Literal["replace", "add"] = "replace"
 
 
 class LogWashRequest(BaseModel):

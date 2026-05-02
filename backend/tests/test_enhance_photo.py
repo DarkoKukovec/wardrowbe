@@ -2,7 +2,7 @@
 import os
 from io import BytesIO
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 import pytest
@@ -11,7 +11,33 @@ from PIL import Image
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.item import ClothingItem, ItemStatus
+from app.schemas.item import ApplyPhotoRequest
 from app.services.image_service import ImageService
+
+
+# ---------------------------------------------------------------------------
+# Schema unit tests
+# ---------------------------------------------------------------------------
+
+
+class TestApplyPhotoRequestSchema:
+    def test_default_action_is_replace(self):
+        req = ApplyPhotoRequest(temp_path="abc/temp_x.jpg")
+        assert req.action == "replace"
+
+    def test_explicit_replace(self):
+        req = ApplyPhotoRequest(temp_path="abc/temp_x.jpg", action="replace")
+        assert req.action == "replace"
+
+    def test_explicit_add(self):
+        req = ApplyPhotoRequest(temp_path="abc/temp_x.jpg", action="add")
+        assert req.action == "add"
+
+    def test_invalid_action_rejected(self):
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            ApplyPhotoRequest(temp_path="abc/temp_x.jpg", action="delete")
 
 
 # ---------------------------------------------------------------------------
@@ -315,6 +341,73 @@ class TestApplyEnhancedPhotoEndpoint:
         data = resp.json()
         assert data["id"] == str(item.id)
         # Temp file should have been removed
+        assert not (storage_path / temp_path).exists()
+
+    @pytest.mark.asyncio
+    async def test_action_replace_is_default(
+        self, client: AsyncClient, auth_headers, db_session: AsyncSession, test_user
+    ):
+        """Omitting ``action`` defaults to replace."""
+        base = "20240101_120000_eee12345"
+        storage_path = Path(os.environ.get("STORAGE_PATH", "/tmp/wardrobe_test"))
+        _create_item_images(storage_path, test_user.id, base)
+
+        svc = ImageService(storage_path=str(storage_path))
+        temp_path = svc.save_temp_image(test_user.id, _make_jpeg_bytes(color=(20, 30, 40)))
+
+        item = ClothingItem(
+            user_id=test_user.id,
+            type="shirt",
+            image_path=f"{test_user.id}/{base}.jpg",
+            status=ItemStatus.ready,
+        )
+        db_session.add(item)
+        await db_session.commit()
+        await db_session.refresh(item)
+
+        # No "action" key — should default to replace
+        resp = await client.post(
+            f"/api/v1/items/{item.id}/apply-enhanced-photo",
+            json={"temp_path": temp_path},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 200
+        assert not (storage_path / temp_path).exists()
+
+    @pytest.mark.asyncio
+    async def test_action_add_creates_additional_image(
+        self, client: AsyncClient, auth_headers, db_session: AsyncSession, test_user
+    ):
+        base = "20240101_120000_fff12345"
+        storage_path = Path(os.environ.get("STORAGE_PATH", "/tmp/wardrobe_test"))
+        _create_item_images(storage_path, test_user.id, base)
+
+        svc = ImageService(storage_path=str(storage_path))
+        temp_path = svc.save_temp_image(test_user.id, _make_jpeg_bytes(color=(50, 60, 70)))
+
+        item = ClothingItem(
+            user_id=test_user.id,
+            type="shirt",
+            image_path=f"{test_user.id}/{base}.jpg",
+            status=ItemStatus.ready,
+        )
+        db_session.add(item)
+        await db_session.commit()
+        await db_session.refresh(item)
+
+        resp = await client.post(
+            f"/api/v1/items/{item.id}/apply-enhanced-photo",
+            json={"temp_path": temp_path, "action": "add"},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["id"] == str(item.id)
+        # Main image path unchanged
+        assert data["image_path"] == f"{test_user.id}/{base}.jpg"
+        # One additional image created
+        assert len(data["additional_images"]) == 1
+        # Temp file removed
         assert not (storage_path / temp_path).exists()
 
     @pytest.mark.asyncio

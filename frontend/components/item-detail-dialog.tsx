@@ -315,13 +315,14 @@ export function ItemDetailDialog({ item, open, onOpenChange }: ItemDetailDialogP
     }
   };
 
-  const handleApplyPhoto = async () => {
+  const handleApplyPhoto = async (action: 'replace' | 'add') => {
     if (!photoPreview) return;
     try {
-      await applyEnhancedPhoto.mutateAsync({ id: item.id, temp_path: photoPreview.tempPath });
+      await applyEnhancedPhoto.mutateAsync({ id: item.id, temp_path: photoPreview.tempPath, action });
       setPhotoPreview(null);
       setImageKey((k) => k + 1);
-      toast.success(photoPreview.action === 'remove-background' ? 'Background removed' : 'Photo enhanced');
+      const verb = photoPreview.action === 'remove-background' ? 'Background removed' : 'Photo enhanced';
+      toast.success(action === 'replace' ? verb : 'Photo added to gallery');
     } catch (error) {
       console.error('Failed to apply photo:', error);
       toast.error('Failed to apply photo');
@@ -1117,7 +1118,7 @@ export function ItemDetailDialog({ item, open, onOpenChange }: ItemDetailDialogP
               {photoPreview?.action === 'remove-background' ? 'Remove background' : 'Generate marketing photo'}
             </AlertDialogTitle>
             <AlertDialogDescription>
-              Preview the result below. Replace the current main photo or cancel to discard.
+              Preview the result below. You can replace the main photo, add it to the gallery, or cancel to discard.
             </AlertDialogDescription>
           </AlertDialogHeader>
           {photoPreview && (
@@ -1151,7 +1152,17 @@ export function ItemDetailDialog({ item, open, onOpenChange }: ItemDetailDialogP
           <AlertDialogFooter>
             <AlertDialogCancel disabled={applyEnhancedPhoto.isPending}>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              onClick={handleApplyPhoto}
+              onClick={() => handleApplyPhoto('add')}
+              disabled={applyEnhancedPhoto.isPending}
+              className="bg-secondary text-secondary-foreground hover:bg-secondary/80"
+            >
+              {applyEnhancedPhoto.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+              ) : null}
+              Add to gallery
+            </AlertDialogAction>
+            <AlertDialogAction
+              onClick={() => handleApplyPhoto('replace')}
               disabled={applyEnhancedPhoto.isPending}
             >
               {applyEnhancedPhoto.isPending ? (

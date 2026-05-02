@@ -181,11 +181,11 @@ export function useApplyEnhancedPhoto() {
   const { data: session } = useSession();
 
   return useMutation({
-    mutationFn: async ({ id, temp_path }: { id: string; temp_path: string }) => {
+    mutationFn: async ({ id, temp_path, action }: { id: string; temp_path: string; action: 'replace' | 'add' }) => {
       if (session?.accessToken) {
         setAccessToken(session.accessToken as string);
       }
-      return api.post<Item>(`/items/${id}/apply-enhanced-photo`, { temp_path });
+      return api.post<Item>(`/items/${id}/apply-enhanced-photo`, { temp_path, action });
     },
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ['items'] });

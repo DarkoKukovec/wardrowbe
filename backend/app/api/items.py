@@ -899,7 +899,11 @@ async def remove_item_background(
         )
 
     hex_color = request.bg_color.lstrip("#")
-    bg_color: tuple[int, int, int] = tuple(int(hex_color[i : i + 2], 16) for i in (0, 2, 4))  # type: ignore[assignment]
+    bg_color: tuple[int, int, int] = (
+        int(hex_color[0:2], 16),
+        int(hex_color[2:4], 16),
+        int(hex_color[4:6], 16),
+    )
 
     try:
         image_service = ImageService()
@@ -1026,11 +1030,16 @@ async def apply_enhanced_photo(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> ItemResponse:
     """
-    Apply a previously generated preview image as the item's main photo.
+    Apply a previously generated preview image to the item.
+
+    ``action='replace'`` (default): overwrites the item's main photo.
+    ``action='add'``: appends the image to the item's additional images (max 4).
 
     The ``temp_path`` must match the value returned by ``remove-background`` or
     ``enhance-photo``. It must belong to the current user.
     """
+    from app.models.item import ItemImage
+
     item_service = ItemService(db)
     item = await item_service.get_by_id(item_id, current_user.id)
 
@@ -1054,25 +1063,76 @@ async def apply_enhanced_photo(
             detail="Access denied",
         )
 
-    try:
-        image_service = ImageService()
-        await asyncio.to_thread(
-            image_service.apply_temp_image, item.image_path, request.temp_path
+    image_service = ImageService()
+
+    if request.action == "replace":
+        try:
+            await asyncio.to_thread(
+                image_service.apply_temp_image, item.image_path, request.temp_path
+            )
+        except ValueError as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(e),
+            ) from None
+        except Exception as e:
+            logger.error(f"Failed to apply enhanced photo: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to apply enhanced photo",
+            ) from None
+
+    else:  # action == "add"
+        from sqlalchemy import func, select
+
+        count_result = await db.execute(
+            select(func.count()).where(ItemImage.item_id == item_id)
         )
-        await db.commit()
-        await db.refresh(item)
-        return ItemResponse.model_validate(item)
-    except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e),
-        ) from None
-    except Exception as e:
-        logger.error(f"Failed to apply enhanced photo: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to apply enhanced photo",
-        ) from None
+        current_count = count_result.scalar() or 0
+        if current_count >= 4:
+            # Clean up temp file and return error
+            await asyncio.to_thread(image_service.discard_temp_image, request.temp_path)
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Maximum of 4 additional images per item",
+            )
+
+        try:
+            temp_full = image_service.storage_path / request.temp_path
+            if not temp_full.exists():
+                raise ValueError(f"Temp image not found: {request.temp_path}")
+
+            image_data = temp_full.read_bytes()
+            image_paths = await image_service.process_and_store(
+                user_id=current_user.id,
+                image_data=image_data,
+                original_filename="enhanced.jpg",
+            )
+            temp_full.unlink(missing_ok=True)
+        except ValueError as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(e),
+            ) from None
+        except Exception as e:
+            logger.error(f"Failed to add enhanced photo: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to add enhanced photo",
+            ) from None
+
+        item_image = ItemImage(
+            item_id=item_id,
+            image_path=image_paths["image_path"],
+            thumbnail_path=image_paths.get("thumbnail_path"),
+            medium_path=image_paths.get("medium_path"),
+            position=current_count,
+        )
+        db.add(item_image)
+
+    await db.commit()
+    await db.refresh(item)
+    return ItemResponse.model_validate(item)
 
 
 @router.post(
