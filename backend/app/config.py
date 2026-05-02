@@ -76,6 +76,9 @@ class Settings(BaseSettings):
     bg_removal_url: str | None = Field(default=None)  # URL for http provider (e.g. withoutbg)
     bg_removal_api_key: str | None = Field(default=None)  # API key for http provider
 
+    # AI image generation (OpenAI-compatible)
+    ai_image_generation_model: str = Field(default="dall-e-3")  # e.g. dall-e-3, gpt-image-1
+
     # Image processing
     thumbnail_size: int = 400
     medium_size: int = 800

@@ -238,6 +238,11 @@ export interface ItemImage {
   medium_url?: string;
 }
 
+export interface EnhancePhotoResponse {
+  preview_url: string;
+  temp_path: string;
+}
+
 // Wash tracking types
 export interface WashHistoryEntry {
   id: string;

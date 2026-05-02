@@ -355,3 +355,72 @@ class ImageService:
             "medium_path": medium_path,
             "thumbnail_path": thumb_path,
         }
+
+    def save_temp_image(self, user_id: uuid.UUID, image_data: bytes) -> str:
+        """
+        Save raw image bytes to a temporary file in the user's storage folder.
+
+        Returns the relative path to the temp file (e.g. "user_id/temp_<uuid>.jpg").
+        """
+        user_path = self._get_user_path(user_id)
+        filename = f"temp_{uuid.uuid4().hex}.jpg"
+        file_path = user_path / filename
+        file_path.write_bytes(image_data)
+        return f"{user_id}/{filename}"
+
+    def apply_temp_image(self, item_image_path: str, temp_path: str) -> dict[str, str]:
+        """
+        Replace an item's image files with the image stored at *temp_path*.
+
+        Regenerates medium and thumbnail variants in-place (same filenames as the
+        original) and deletes the temp file afterwards.
+
+        Returns a dict with the (unchanged) relative paths for original/medium/thumb.
+        Raises ValueError if either path does not exist.
+        """
+        temp_full = self.storage_path / temp_path
+        if not temp_full.exists():
+            raise ValueError(f"Temp image not found: {temp_path}")
+
+        base_path = item_image_path.rsplit(".", 1)[0]
+        original_full = self.storage_path / item_image_path
+        medium_path = f"{base_path}_medium.jpg"
+        medium_full = self.storage_path / medium_path
+        thumb_path = f"{base_path}_thumb.jpg"
+        thumb_full = self.storage_path / thumb_path
+
+        if not original_full.exists():
+            raise ValueError(f"Item image not found: {item_image_path}")
+
+        image = Image.open(temp_full).convert("RGB")
+
+        for size_name, max_size in SIZES.items():
+            if size_name == "original":
+                file_path = original_full
+                quality = 95
+            elif size_name == "medium":
+                file_path = medium_full
+                quality = 90
+            else:
+                file_path = thumb_full
+                quality = 88
+
+            img_copy = image.copy()
+            img_copy.thumbnail(max_size, Image.Resampling.LANCZOS)
+
+            output = BytesIO()
+            img_copy.save(output, format="JPEG", quality=quality, optimize=True)
+            file_path.write_bytes(output.getvalue())
+
+        temp_full.unlink(missing_ok=True)
+
+        return {
+            "image_path": item_image_path,
+            "medium_path": medium_path,
+            "thumbnail_path": thumb_path,
+        }
+
+    def discard_temp_image(self, temp_path: str) -> None:
+        """Delete a temporary image if it still exists."""
+        temp_full = self.storage_path / temp_path
+        temp_full.unlink(missing_ok=True)

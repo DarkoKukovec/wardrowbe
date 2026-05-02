@@ -1,5 +1,6 @@
 from datetime import date, datetime
 from decimal import Decimal
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
@@ -272,6 +273,24 @@ class RemoveBackgroundRequest(BaseModel):
         pattern=r"^#[0-9A-Fa-f]{6}$",
         description="Hex color for the replacement background",
     )
+
+
+class EnhancePhotoResponse(BaseModel):
+    """Response from generate-preview endpoints (remove-background and enhance-photo)."""
+
+    preview_url: str
+    temp_path: str
+
+
+class ApplyPhotoRequest(BaseModel):
+    """Request to apply a previously generated temp image.
+
+    ``action`` controls whether the temp image replaces the item's main photo
+    (``replace``) or is appended as an additional image (``add``).
+    """
+
+    temp_path: str
+    action: Literal["replace", "add"] = "replace"
 
 
 class LogWashRequest(BaseModel):

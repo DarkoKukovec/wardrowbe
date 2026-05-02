@@ -25,6 +25,7 @@ import {
   Plus,
   Star,
   ImageIcon,
+  Wand2,
   Camera,
 } from 'lucide-react';
 import {
@@ -58,7 +59,7 @@ import {
 import { Progress } from '@/components/ui/progress';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { toast } from 'sonner';
-import { useUpdateItem, useDeleteItem, useReanalyzeItem, useRotateImage, useRemoveBackground, useLogWash, useWashHistory, useItemWearStats, useItemWearHistory, useAddItemImage, useDeleteItemImage, useSetPrimaryImage } from '@/lib/hooks/use-items';
+import { useUpdateItem, useDeleteItem, useReanalyzeItem, useRotateImage, useRemoveBackground, useEnhancePhoto, useApplyEnhancedPhoto, useLogWash, useWashHistory, useItemWearStats, useItemWearHistory, useAddItemImage, useDeleteItemImage, useSetPrimaryImage } from '@/lib/hooks/use-items';
 import { Item, CLOTHING_TYPES, CLOTHING_COLORS } from '@/lib/types';
 import { ColorEyedropper } from '@/components/color-eyedropper';
 import { GeneratePairingsDialog } from '@/components/generate-pairings-dialog';
@@ -156,12 +157,19 @@ export function ItemDetailDialog({ item, open, onOpenChange }: ItemDetailDialogP
   const [showWashHistory, setShowWashHistory] = useState(false);
   const [showWearHistory, setShowWearHistory] = useState(false);
   const [activeImageIndex, setActiveImageIndex] = useState(0);
+  const [photoPreview, setPhotoPreview] = useState<{
+    previewUrl: string;
+    tempPath: string;
+    action: 'remove-background' | 'enhance-photo';
+  } | null>(null);
 
   const updateItem = useUpdateItem();
   const deleteItem = useDeleteItem();
   const reanalyzeItem = useReanalyzeItem();
   const rotateImage = useRotateImage();
   const removeBackground = useRemoveBackground();
+  const enhancePhoto = useEnhancePhoto();
+  const applyEnhancedPhoto = useApplyEnhancedPhoto();
   const { data: features } = useFeatures();
   const logWash = useLogWash();
   const { data: washHistory } = useWashHistory(item?.id || '');
@@ -291,12 +299,35 @@ export function ItemDetailDialog({ item, open, onOpenChange }: ItemDetailDialogP
 
   const handleRemoveBackground = async () => {
     try {
-      await removeBackground.mutateAsync({ id: item.id });
-      setImageKey((k) => k + 1);
-      toast.success('Background removed');
+      const result = await removeBackground.mutateAsync({ id: item.id });
+      setPhotoPreview({ previewUrl: result.preview_url, tempPath: result.temp_path, action: 'remove-background' });
     } catch (error) {
       console.error('Failed to remove background:', error);
       toast.error('Failed to remove background');
+    }
+  };
+
+  const handleEnhancePhoto = async () => {
+    try {
+      const result = await enhancePhoto.mutateAsync({ id: item.id });
+      setPhotoPreview({ previewUrl: result.preview_url, tempPath: result.temp_path, action: 'enhance-photo' });
+    } catch (error) {
+      console.error('Failed to enhance photo:', error);
+      toast.error('Failed to generate enhanced photo');
+    }
+  };
+
+  const handleApplyPhoto = async (action: 'replace' | 'add') => {
+    if (!photoPreview) return;
+    try {
+      await applyEnhancedPhoto.mutateAsync({ id: item.id, temp_path: photoPreview.tempPath, action });
+      setPhotoPreview(null);
+      setImageKey((k) => k + 1);
+      const verb = photoPreview.action === 'remove-background' ? 'Background removed' : 'Photo enhanced';
+      toast.success(action === 'replace' ? verb : 'Photo added to gallery');
+    } catch (error) {
+      console.error('Failed to apply photo:', error);
+      toast.error('Failed to apply photo');
     }
   };
 
@@ -394,6 +425,21 @@ export function ItemDetailDialog({ item, open, onOpenChange }: ItemDetailDialogP
                     <Loader2 className="h-5 w-5 animate-spin" />
                   ) : (
                     <Eraser className="h-5 w-5" />
+                  )}
+                </Button>
+              )}
+              {features?.image_generation && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={handleEnhancePhoto}
+                  disabled={enhancePhoto.isPending || !item.image_url}
+                  title="Generate marketing photo"
+                >
+                  {enhancePhoto.isPending ? (
+                    <Loader2 className="h-5 w-5 animate-spin" />
+                  ) : (
+                    <Wand2 className="h-5 w-5" />
                   )}
                 </Button>
               )}
@@ -1089,6 +1135,70 @@ export function ItemDetailDialog({ item, open, onOpenChange }: ItemDetailDialogP
                 <Loader2 className="h-4 w-4 animate-spin mr-2" />
               ) : null}
               Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Photo Preview Confirmation */}
+      <AlertDialog open={!!photoPreview} onOpenChange={(open) => { if (!open) setPhotoPreview(null); }}>
+        <AlertDialogContent className="sm:max-w-lg">
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {photoPreview?.action === 'remove-background' ? 'Remove background' : 'Generate marketing photo'}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Preview the result below. You can replace the main photo, add it to the gallery, or cancel to discard.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {photoPreview && (
+            <div className="grid grid-cols-2 gap-3 my-2">
+              <div className="space-y-1">
+                <p className="text-xs text-center text-muted-foreground">Current</p>
+                <div className="relative aspect-square bg-muted rounded-lg overflow-hidden">
+                  <Image
+                    src={`${imageUrl}&v=${imageKey}`}
+                    alt="Current photo"
+                    fill
+                    className="object-cover"
+                    sizes="200px"
+                  />
+                </div>
+              </div>
+              <div className="space-y-1">
+                <p className="text-xs text-center text-muted-foreground">New</p>
+                <div className="relative aspect-square bg-muted rounded-lg overflow-hidden">
+                  <Image
+                    src={photoPreview.previewUrl}
+                    alt="Preview"
+                    fill
+                    className="object-cover"
+                    sizes="200px"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={applyEnhancedPhoto.isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => handleApplyPhoto('add')}
+              disabled={applyEnhancedPhoto.isPending}
+              className="bg-secondary text-secondary-foreground hover:bg-secondary/80"
+            >
+              {applyEnhancedPhoto.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+              ) : null}
+              Add to gallery
+            </AlertDialogAction>
+            <AlertDialogAction
+              onClick={() => handleApplyPhoto('replace')}
+              disabled={applyEnhancedPhoto.isPending}
+            >
+              {applyEnhancedPhoto.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+              ) : null}
+              Replace main photo
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

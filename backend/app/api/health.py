@@ -45,6 +45,14 @@ async def feature_check() -> dict[str, Any]:
         features["background_removal"] = True
     except Exception:
         features["background_removal"] = False
+
+    try:
+        from app.services.image_generation_service import ImageGenerationService
+
+        features["image_generation"] = ImageGenerationService().is_available()
+    except Exception:
+        features["image_generation"] = False
+
     return features
 
 
