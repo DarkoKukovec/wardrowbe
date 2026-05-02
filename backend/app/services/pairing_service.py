@@ -11,7 +11,7 @@ from app.models.item import ClothingItem, ItemStatus
 from app.models.outfit import FamilyOutfitRating, Outfit, OutfitItem, OutfitSource, OutfitStatus
 from app.models.user import User
 from app.services.ai_service import AIService
-from app.utils.clothing import deduplicate_by_body_slot
+from app.utils.clothing import OUTFIT_EXCLUDED_TYPES, deduplicate_by_body_slot
 from app.utils.prompts import load_prompt
 from app.utils.timezone import get_user_today
 
@@ -47,7 +47,8 @@ class PairingService:
             )
         )
         result = await self.db.execute(query)
-        return list(result.scalars().all())
+        items = list(result.scalars().all())
+        return [i for i in items if i.type not in OUTFIT_EXCLUDED_TYPES]
 
     def _format_item_description(self, item: ClothingItem) -> str:
         parts = []
