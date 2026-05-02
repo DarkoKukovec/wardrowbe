@@ -224,6 +224,18 @@ export interface JoinFamilyResponse {
   role: string;
 }
 
+export interface MemberWashingItems {
+  member_id: string;
+  member_name: string;
+  member_avatar_url?: string;
+  items: Item[];
+}
+
+export interface FamilyWashingResponse {
+  members: MemberWashingItems[];
+  total: number;
+}
+
 // Multi-image types
 export interface ItemImage {
   id: string;

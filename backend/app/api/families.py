@@ -14,17 +14,19 @@ from app.schemas.family import (
     FamilyMember,
     FamilyResponse,
     FamilyUpdate,
+    FamilyWashingResponse,
     InviteCodeResponse,
     InviteMemberRequest,
     InviteResponse,
     JoinByTokenRequest,
     JoinFamilyRequest,
     JoinFamilyResponse,
+    MemberWashingItems,
     MessageResponse,
     PendingInvite,
     UpdateMemberRoleRequest,
 )
-from app.schemas.item import ItemFilter, ItemListResponse, ItemResponse
+from app.schemas.item import ItemFilter, ItemListResponse, ItemResponse, LogWashRequest
 from app.schemas.notification import EmailConfig
 from app.services.family_service import FamilyService
 from app.services.item_service import ItemService
@@ -517,3 +519,122 @@ async def get_family_member_items(
         page_size=page_size,
         has_more=(page * page_size) < total,
     )
+
+
+@router.get("/me/washing", response_model=FamilyWashingResponse)
+async def get_family_washing(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> FamilyWashingResponse:
+    if current_user.family_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="You are not in a family",
+        )
+
+    family_service = FamilyService(db)
+    family = await family_service.get_user_family(current_user)
+
+    if family is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Family not found",
+        )
+
+    item_service = ItemService(db)
+    wash_filters = ItemFilter(needs_wash=True, is_archived=False)
+
+    member_washing_list: list[MemberWashingItems] = []
+    total = 0
+
+    for member in family.members:
+        if not member.is_active:
+            continue
+
+        items, count = await item_service.get_list(
+            user_id=member.id,
+            filters=wash_filters,
+            page=1,
+            page_size=100,
+        )
+
+        if count > 0:
+            member_washing_list.append(
+                MemberWashingItems(
+                    member_id=member.id,
+                    member_name=member.display_name,
+                    member_avatar_url=member.avatar_url,
+                    items=[ItemResponse.model_validate(item) for item in items],
+                )
+            )
+            total += count
+
+    return FamilyWashingResponse(members=member_washing_list, total=total)
+
+
+@router.post("/me/members/{member_id}/items/{item_id}/wash", response_model=ItemResponse)
+async def log_family_member_item_wash(
+    member_id: UUID,
+    item_id: UUID,
+    request: LogWashRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> ItemResponse:
+    from datetime import UTC, datetime
+    from zoneinfo import ZoneInfo
+
+    if current_user.family_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="You are not in a family",
+        )
+
+    family_service = FamilyService(db)
+    family = await family_service.get_user_family(current_user)
+
+    if family is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Family not found",
+        )
+
+    member = next((m for m in family.members if m.id == member_id and m.is_active), None)
+    if member is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Member not found in your family",
+        )
+
+    item_service = ItemService(db)
+    item = await item_service.get_by_id(item_id, member_id)
+
+    if not item:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Item not found",
+        )
+
+    if item.wears_since_wash == 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Item is already clean (0 wears since last wash)",
+        )
+
+    if request.washed_at is None:
+        try:
+            user_tz = ZoneInfo(current_user.timezone or "UTC")
+        except Exception:
+            user_tz = ZoneInfo("UTC")
+        washed_at = datetime.now(UTC).astimezone(user_tz).date()
+    else:
+        washed_at = request.washed_at
+
+    await item_service.log_wash(
+        item=item,
+        washed_at=washed_at,
+        method=request.method,
+        notes=request.notes,
+    )
+
+    await db.refresh(item)
+    return ItemResponse.model_validate(item)

@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useSession } from 'next-auth/react';
 import { api, getAccessToken, setAccessToken, ApiError, NetworkError } from '@/lib/api';
-import { Item, ItemListResponse, ItemFilter, WashHistoryEntry, ItemImage } from '@/lib/types';
+import { Item, ItemListResponse, ItemFilter, WashHistoryEntry, ItemImage, FamilyWashingResponse } from '@/lib/types';
 
 // Helper to set token if available (for NextAuth mode)
 function useSetTokenIfAvailable() {
@@ -753,4 +753,49 @@ export function useBulkCreateItems() {
     ...mutation,
     uploadProgress,
   };
+}
+
+export function useFamilyWashing() {
+  const { status } = useSession();
+  useSetTokenIfAvailable();
+
+  return useQuery({
+    queryKey: ['family-washing'],
+    queryFn: () => api.get<FamilyWashingResponse>('/families/me/washing'),
+    enabled: status !== 'loading',
+  });
+}
+
+export function useFamilyMemberWash() {
+  const queryClient = useQueryClient();
+  const { data: session } = useSession();
+
+  return useMutation({
+    mutationFn: async ({
+      memberId,
+      itemId,
+      washed_at,
+      method,
+      notes,
+    }: {
+      memberId: string;
+      itemId: string;
+      washed_at?: string;
+      method?: string;
+      notes?: string;
+    }) => {
+      if (session?.accessToken) {
+        setAccessToken(session.accessToken as string);
+      }
+      return api.post<Item>(`/families/me/members/${memberId}/items/${itemId}/wash`, {
+        washed_at,
+        method,
+        notes,
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['family-washing'] });
+      queryClient.invalidateQueries({ queryKey: ['family-member-items'] });
+    },
+  });
 }

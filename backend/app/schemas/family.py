@@ -1,7 +1,13 @@
+from __future__ import annotations
+
 from datetime import datetime
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
+
+if TYPE_CHECKING:
+    from app.schemas.item import ItemResponse
 
 
 class FamilyMember(BaseModel):
@@ -89,3 +95,15 @@ class UpdateMemberRoleRequest(BaseModel):
 
 class MessageResponse(BaseModel):
     message: str
+
+
+class MemberWashingItems(BaseModel):
+    member_id: UUID
+    member_name: str
+    member_avatar_url: str | None = None
+    items: list[ItemResponse]
+
+
+class FamilyWashingResponse(BaseModel):
+    members: list[MemberWashingItems]
+    total: int
