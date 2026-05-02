@@ -10,7 +10,13 @@ from app.config import get_settings
 logger = logging.getLogger(__name__)
 
 
-def _build_prompt(item_type: str | None, color: str | None, pattern: str | None, material: str | None) -> str:
+def _build_prompt(
+    item_type: str | None,
+    color: str | None,
+    pattern: str | None,
+    material: str | None,
+    custom_prompt: str | None = None,
+) -> str:
     """Build a descriptive marketing photo prompt from item attributes."""
     parts: list[str] = []
     if color:
@@ -23,11 +29,14 @@ def _build_prompt(item_type: str | None, color: str | None, pattern: str | None,
         parts.append(item_type)
 
     item_description = " ".join(parts) if parts else "clothing item"
-    return (
+    base = (
         f"A {item_description}, presented as a professional e-commerce product photo: "
         "clean white background, no wrinkles, perfectly flat-laid or ghost-mannequin style, "
         "studio lighting, sharp focus, no people, no mannequin visible, marketing quality."
     )
+    if custom_prompt and custom_prompt.strip():
+        return f"{base} Additional instructions: {custom_prompt.strip()}"
+    return base
 
 
 class ImageGenerationService:
@@ -52,9 +61,17 @@ class ImageGenerationService:
         color: str | None = None,
         pattern: str | None = None,
         material: str | None = None,
+        custom_prompt: str | None = None,
     ) -> bytes:
         """
         Generate a marketing-style photo of a clothing item.
+
+        Args:
+            item_type: Clothing type (e.g. "shirt").
+            color: Primary colour.
+            pattern: Pattern descriptor.
+            material: Fabric/material.
+            custom_prompt: Optional free-text instructions to steer the generation.
 
         Returns raw JPEG bytes of the generated image.
         Raises ValueError if image generation is not configured.
@@ -66,7 +83,7 @@ class ImageGenerationService:
                 "Set AI_BASE_URL and AI_API_KEY to enable this feature."
             )
 
-        prompt = _build_prompt(item_type, color, pattern, material)
+        prompt = _build_prompt(item_type, color, pattern, material, custom_prompt)
         model = self.settings.ai_image_generation_model
 
         logger.info(f"Generating marketing photo with model={model}, prompt={prompt!r}")
