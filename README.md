@@ -308,6 +308,7 @@ See the [k8s/](k8s/) directory for Kubernetes manifests including:
 | `BG_REMOVAL_MODEL` | rembg model name (default: `u2net`) | No |
 | `BG_REMOVAL_URL` | URL for HTTP bg removal provider | If http |
 | `BG_REMOVAL_API_KEY` | API key for HTTP bg removal provider | No |
+| `AI_IMAGE_GENERATION_MODEL` | Model name for marketing photo generation (default: `dall-e-3`) | No |
 
 See [.env.example](.env.example) for all options.
 
@@ -329,6 +330,18 @@ BG_REMOVAL_API_KEY=          # optional
 ```
 
 If neither is configured, the remove-background button returns a 501 with setup instructions.
+
+### AI Marketing Photo Generation (Optional)
+
+Generate clean, wrinkle-free, studio-quality product photos of your clothing items using an AI image generation model. Results are shown as a preview before replacing the original photo.
+
+Requires `AI_BASE_URL` and `AI_API_KEY` to be set (the same OpenAI-compatible endpoint used for clothing analysis). Configure the model with:
+
+```env
+AI_IMAGE_GENERATION_MODEL=dall-e-3   # default; any OpenAI-compatible image generation model
+```
+
+When both `AI_BASE_URL` and `AI_API_KEY` are set, a ✨ wand button appears in the item detail dialog next to the "Remove background" button.
 
 ### Authentication
 

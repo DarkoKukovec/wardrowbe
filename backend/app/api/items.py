@@ -14,12 +14,14 @@ from app.database import get_db
 from app.models.user import User
 from app.schemas.item import (
     ArchiveRequest,
+    ApplyPhotoRequest,
     BulkAnalyzeRequest,
     BulkAnalyzeResponse,
     BulkDeleteRequest,
     BulkDeleteResponse,
     BulkUploadResponse,
     BulkUploadResult,
+    EnhancePhotoResponse,
     ItemCreate,
     ItemFilter,
     ItemImageResponse,
@@ -865,13 +867,22 @@ async def rotate_item_image(
         ) from None
 
 
-@router.post("/{item_id}/remove-background", response_model=ItemResponse)
+
+@router.post("/{item_id}/remove-background", response_model=EnhancePhotoResponse)
 async def remove_item_background(
     item_id: UUID,
     request: RemoveBackgroundRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
-) -> ItemResponse:
+) -> EnhancePhotoResponse:
+    """
+    Remove the background of an item's image and return a preview.
+
+    The original image is NOT modified yet. Call ``apply-enhanced-photo`` to
+    replace the item's image with the preview, or discard it by doing nothing.
+    """
+    from app.utils.signed_urls import sign_image_url
+
     item_service = ItemService(db)
     item = await item_service.get_by_id(item_id, current_user.id)
 
@@ -888,14 +899,39 @@ async def remove_item_background(
         )
 
     hex_color = request.bg_color.lstrip("#")
-    bg_color = tuple(int(hex_color[i : i + 2], 16) for i in (0, 2, 4))
+    bg_color: tuple[int, int, int] = tuple(int(hex_color[i : i + 2], 16) for i in (0, 2, 4))  # type: ignore[assignment]
 
     try:
         image_service = ImageService()
-        await asyncio.to_thread(image_service.remove_background, item.image_path, bg_color)
-        await db.commit()
-        await db.refresh(item)
-        return ItemResponse.model_validate(item)
+
+        def _run() -> str:
+            from app.services.background_removal import get_provider
+            from PIL import Image
+
+            provider = get_provider()
+            original_full = image_service.storage_path / item.image_path
+            if not original_full.exists():
+                raise ValueError(f"Image not found: {item.image_path}")
+
+            image = Image.open(original_full).convert("RGB")
+            result = provider.remove(image)
+
+            from PIL import Image as PILImage
+            from io import BytesIO
+
+            background = PILImage.new("RGBA", result.size, (*bg_color, 255))
+            background.paste(result, mask=result.split()[3])
+            final = background.convert("RGB")
+
+            buf = BytesIO()
+            final.save(buf, format="JPEG", quality=95, optimize=True)
+            return image_service.save_temp_image(current_user.id, buf.getvalue())
+
+        temp_path = await asyncio.to_thread(_run)
+        return EnhancePhotoResponse(
+            preview_url=sign_image_url(temp_path),
+            temp_path=temp_path,
+        )
     except ImportError:
         raise HTTPException(
             status_code=status.HTTP_501_NOT_IMPLEMENTED,
@@ -913,6 +949,129 @@ async def remove_item_background(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to remove background",
+        ) from None
+
+
+@router.post("/{item_id}/enhance-photo", response_model=EnhancePhotoResponse)
+async def enhance_item_photo(
+    item_id: UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> EnhancePhotoResponse:
+    """
+    Generate an AI marketing-style photo for the item and return a preview.
+
+    The original image is NOT modified yet. Call ``apply-enhanced-photo`` to
+    replace the item's image with the preview, or discard it by doing nothing.
+    """
+    from app.services.image_generation_service import ImageGenerationService
+    from app.utils.signed_urls import sign_image_url
+
+    item_service = ItemService(db)
+    item = await item_service.get_by_id(item_id, current_user.id)
+
+    if not item:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Item not found",
+        )
+
+    gen_service = ImageGenerationService()
+    if not gen_service.is_available():
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail="Image generation is not configured. "
+            "Set AI_BASE_URL and AI_API_KEY to enable this feature.",
+        )
+
+    try:
+        image_data = await gen_service.generate(
+            item_type=item.type,
+            color=item.primary_color,
+            pattern=item.tags.get("pattern") if item.tags else None,
+            material=item.tags.get("material") if item.tags else None,
+        )
+        image_service = ImageService()
+        temp_path = await asyncio.to_thread(
+            image_service.save_temp_image, current_user.id, image_data
+        )
+        return EnhancePhotoResponse(
+            preview_url=sign_image_url(temp_path),
+            temp_path=temp_path,
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        ) from None
+    except RuntimeError as e:
+        logger.error(f"Image generation failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Image generation failed. Please try again later.",
+        ) from None
+    except Exception as e:
+        logger.error(f"Unexpected error during image generation: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to generate enhanced photo",
+        ) from None
+
+
+@router.post("/{item_id}/apply-enhanced-photo", response_model=ItemResponse)
+async def apply_enhanced_photo(
+    item_id: UUID,
+    request: ApplyPhotoRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> ItemResponse:
+    """
+    Apply a previously generated preview image as the item's main photo.
+
+    The ``temp_path`` must match the value returned by ``remove-background`` or
+    ``enhance-photo``. It must belong to the current user.
+    """
+    item_service = ItemService(db)
+    item = await item_service.get_by_id(item_id, current_user.id)
+
+    if not item:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Item not found",
+        )
+
+    if not item.image_path:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Item has no image",
+        )
+
+    # Security: ensure the temp_path belongs to this user
+    user_prefix = f"{current_user.id}/"
+    if not request.temp_path.startswith(user_prefix):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied",
+        )
+
+    try:
+        image_service = ImageService()
+        await asyncio.to_thread(
+            image_service.apply_temp_image, item.image_path, request.temp_path
+        )
+        await db.commit()
+        await db.refresh(item)
+        return ItemResponse.model_validate(item)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        ) from None
+    except Exception as e:
+        logger.error(f"Failed to apply enhanced photo: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to apply enhanced photo",
         ) from None
 
 

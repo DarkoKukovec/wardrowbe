@@ -272,6 +272,19 @@ class RemoveBackgroundRequest(BaseModel):
     )
 
 
+class EnhancePhotoResponse(BaseModel):
+    """Response from generate-preview endpoints (remove-background and enhance-photo)."""
+
+    preview_url: str
+    temp_path: str
+
+
+class ApplyPhotoRequest(BaseModel):
+    """Request to apply a previously generated temp image as the item's main photo."""
+
+    temp_path: str
+
+
 class LogWashRequest(BaseModel):
     washed_at: date | None = None  # If None, use user's timezone to determine today
     method: str | None = Field(None, max_length=50)

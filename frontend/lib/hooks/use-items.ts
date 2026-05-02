@@ -151,7 +151,6 @@ export function useUpdateItem() {
 }
 
 export function useRemoveBackground() {
-  const queryClient = useQueryClient();
   const { data: session } = useSession();
 
   return useMutation({
@@ -159,7 +158,34 @@ export function useRemoveBackground() {
       if (session?.accessToken) {
         setAccessToken(session.accessToken as string);
       }
-      return api.post<Item>(`/items/${id}/remove-background`, { bg_color: bg_color ?? '#FFFFFF' });
+      return api.post<import('@/lib/types').EnhancePhotoResponse>(`/items/${id}/remove-background`, { bg_color: bg_color ?? '#FFFFFF' });
+    },
+  });
+}
+
+export function useEnhancePhoto() {
+  const { data: session } = useSession();
+
+  return useMutation({
+    mutationFn: async ({ id }: { id: string }) => {
+      if (session?.accessToken) {
+        setAccessToken(session.accessToken as string);
+      }
+      return api.post<import('@/lib/types').EnhancePhotoResponse>(`/items/${id}/enhance-photo`, {});
+    },
+  });
+}
+
+export function useApplyEnhancedPhoto() {
+  const queryClient = useQueryClient();
+  const { data: session } = useSession();
+
+  return useMutation({
+    mutationFn: async ({ id, temp_path }: { id: string; temp_path: string }) => {
+      if (session?.accessToken) {
+        setAccessToken(session.accessToken as string);
+      }
+      return api.post<Item>(`/items/${id}/apply-enhanced-photo`, { temp_path });
     },
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ['items'] });
