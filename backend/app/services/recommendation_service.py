@@ -26,7 +26,7 @@ from app.services.ai_service import AIService
 from app.services.item_scorer import get_season, score_items
 from app.services.suggestion_cache import pop_suggestion, push_suggestions
 from app.services.weather_service import WeatherData, WeatherService, WeatherServiceError
-from app.utils.clothing import deduplicate_by_body_slot
+from app.utils.clothing import OUTFIT_EXCLUDED_TYPES, deduplicate_by_body_slot
 from app.utils.prompts import load_prompt
 from app.utils.timezone import get_user_today
 
@@ -100,6 +100,7 @@ class RecommendationService:
 
         items = [i for i in items if not i.needs_wash]
         items = [i for i in items if i.type and i.type != "unknown"]
+        items = [i for i in items if i.type not in OUTFIT_EXCLUDED_TYPES]
 
         if exclude_items:
             exclude_set = set(exclude_items)

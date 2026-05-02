@@ -25,6 +25,8 @@ DEFAULT_WASH_INTERVALS: dict[str, int] = {
     "suit": 5,
     "shoes": 15,
     "accessories": 20,
+    "pajamas": 3,
+    "swimwear": 1,
     "other": 3,
 }
 

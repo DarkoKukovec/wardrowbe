@@ -3,6 +3,8 @@ from uuid import UUID
 
 logger = logging.getLogger(__name__)
 
+OUTFIT_EXCLUDED_TYPES: frozenset[str] = frozenset({"pajamas", "swimwear"})
+
 ITEM_ROLE: dict[str, str] = {
     "shirt": "base_top",
     "t-shirt": "base_top",

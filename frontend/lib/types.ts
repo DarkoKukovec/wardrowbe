@@ -172,6 +172,8 @@ export const CLOTHING_TYPES = [
   { label: 'Belt', value: 'belt' },
   { label: 'Bag', value: 'bag' },
   { label: 'Accessories', value: 'accessories' },
+  { label: 'Pajamas', value: 'pajamas' },
+  { label: 'Swimwear', value: 'swimwear' },
 ] as const;
 
 export const OCCASIONS = [
