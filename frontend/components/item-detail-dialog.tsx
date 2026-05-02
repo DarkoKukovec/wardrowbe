@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Image from 'next/image';
 import {
   Heart,
@@ -25,6 +25,7 @@ import {
   Plus,
   Star,
   ImageIcon,
+  Camera,
 } from 'lucide-react';
 import {
   Dialog,
@@ -169,6 +170,7 @@ export function ItemDetailDialog({ item, open, onOpenChange }: ItemDetailDialogP
   const addImage = useAddItemImage();
   const deleteImage = useDeleteItemImage();
   const setPrimary = useSetPrimaryImage();
+  const addImageCameraInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (item) {
@@ -537,6 +539,34 @@ export function ItemDetailDialog({ item, open, onOpenChange }: ItemDetailDialogP
                     </label>
                   )}
                 </div>
+              )}
+              {isEditing && (item.additional_images?.length || 0) < 4 && (
+                <>
+                  <input
+                    ref={addImageCameraInputRef}
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        addImage.mutate({ itemId: item.id, file });
+                      }
+                      e.target.value = '';
+                    }}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="w-full sm:hidden"
+                    onClick={() => addImageCameraInputRef.current?.click()}
+                  >
+                    <Camera className="mr-2 h-4 w-4" />
+                    Take Photo
+                  </Button>
+                </>
               )}
             </div>
 
