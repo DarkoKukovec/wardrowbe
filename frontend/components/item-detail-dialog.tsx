@@ -27,6 +27,8 @@ import {
   ImageIcon,
   Wand2,
   Camera,
+  Archive,
+  ArchiveRestore,
 } from 'lucide-react';
 import {
   Dialog,
@@ -59,7 +61,7 @@ import {
 import { Progress } from '@/components/ui/progress';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { toast } from 'sonner';
-import { useUpdateItem, useDeleteItem, useReanalyzeItem, useRotateImage, useRemoveBackground, useEnhancePhoto, useApplyEnhancedPhoto, useLogWash, useWashHistory, useItemWearStats, useItemWearHistory, useAddItemImage, useDeleteItemImage, useSetPrimaryImage } from '@/lib/hooks/use-items';
+import { useUpdateItem, useDeleteItem, useReanalyzeItem, useRotateImage, useRemoveBackground, useEnhancePhoto, useApplyEnhancedPhoto, useLogWash, useWashHistory, useItemWearStats, useItemWearHistory, useAddItemImage, useDeleteItemImage, useSetPrimaryImage, useArchiveItem, useRestoreItem } from '@/lib/hooks/use-items';
 import { Item, CLOTHING_TYPES, CLOTHING_COLORS } from '@/lib/types';
 import { ColorEyedropper } from '@/components/color-eyedropper';
 import { GeneratePairingsDialog } from '@/components/generate-pairings-dialog';
@@ -133,6 +135,8 @@ function TagInput({ values, onChange, placeholder }: TagInputProps) {
 export function ItemDetailDialog({ item, open, onOpenChange }: ItemDetailDialogProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
+  const [archiveReason, setArchiveReason] = useState('');
   const [showPairingsDialog, setShowPairingsDialog] = useState(false);
   const [imageKey, setImageKey] = useState(0);
   const [editForm, setEditForm] = useState({
@@ -165,6 +169,8 @@ export function ItemDetailDialog({ item, open, onOpenChange }: ItemDetailDialogP
 
   const updateItem = useUpdateItem();
   const deleteItem = useDeleteItem();
+  const archiveItem = useArchiveItem();
+  const restoreItem = useRestoreItem();
   const reanalyzeItem = useReanalyzeItem();
   const rotateImage = useRotateImage();
   const removeBackground = useRemoveBackground();
@@ -261,6 +267,37 @@ export function ItemDetailDialog({ item, open, onOpenChange }: ItemDetailDialogP
     } catch (error) {
       console.error('Failed to delete item:', error);
       toast.error('Failed to delete', {
+        description: 'Something went wrong. Please try again.',
+      });
+    }
+  };
+
+  const handleArchive = async () => {
+    try {
+      await archiveItem.mutateAsync({ id: item.id, reason: archiveReason || undefined });
+      setShowArchiveConfirm(false);
+      setArchiveReason('');
+      onOpenChange(false);
+      toast.success('Item archived', {
+        description: item.name ? `"${item.name}" has been archived and won't appear in outfit suggestions.` : 'Item archived.',
+      });
+    } catch (error) {
+      console.error('Failed to archive item:', error);
+      toast.error('Failed to archive item', {
+        description: 'Something went wrong. Please try again.',
+      });
+    }
+  };
+
+  const handleRestore = async () => {
+    try {
+      await restoreItem.mutateAsync(item.id);
+      toast.success('Item restored', {
+        description: item.name ? `"${item.name}" is back in your active wardrobe.` : 'Item restored.',
+      });
+    } catch (error) {
+      console.error('Failed to restore item:', error);
+      toast.error('Failed to restore item', {
         description: 'Something went wrong. Please try again.',
       });
     }
@@ -1088,17 +1125,51 @@ export function ItemDetailDialog({ item, open, onOpenChange }: ItemDetailDialogP
                   )}
 
                   {/* Metadata */}
-                  <div className="text-xs text-muted-foreground pt-2 border-t">
-                    Added {new Date(item.created_at).toLocaleDateString()}
+                  <div className="text-xs text-muted-foreground pt-2 border-t space-y-1">
+                    <p>Added {new Date(item.created_at).toLocaleDateString()}</p>
+                    {item.is_archived && (
+                      <div className="flex items-center gap-1.5 text-amber-600 dark:text-amber-400">
+                        <Archive className="h-3.5 w-3.5" />
+                        <span>
+                          Archived{item.archived_at ? ` on ${new Date(item.archived_at).toLocaleDateString()}` : ''}
+                          {item.archive_reason ? ` · ${item.archive_reason}` : ''}
+                        </span>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
             </div>
             </div>
 
-            {/* Delete button - separated from other actions for safety */}
+            {/* Archive/Restore and Delete buttons - separated from other actions for safety */}
             {!isEditing && (
-              <div className="pt-4 border-t mt-4">
+              <div className="pt-4 border-t mt-4 flex flex-wrap gap-2">
+                {item.is_archived ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleRestore}
+                    disabled={restoreItem.isPending}
+                  >
+                    {restoreItem.isPending ? (
+                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                    ) : (
+                      <ArchiveRestore className="h-4 w-4 mr-2" />
+                    )}
+                    Restore item
+                  </Button>
+                ) : (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-muted-foreground hover:text-foreground"
+                    onClick={() => setShowArchiveConfirm(true)}
+                  >
+                    <Archive className="h-4 w-4 mr-2" />
+                    Archive this item
+                  </Button>
+                )}
                 <Button
                   variant="ghost"
                   size="sm"
@@ -1135,6 +1206,39 @@ export function ItemDetailDialog({ item, open, onOpenChange }: ItemDetailDialogP
                 <Loader2 className="h-4 w-4 animate-spin mr-2" />
               ) : null}
               Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Archive Confirmation */}
+      <AlertDialog open={showArchiveConfirm} onOpenChange={(open) => { setShowArchiveConfirm(open); if (!open) setArchiveReason(''); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Archive this item?</AlertDialogTitle>
+            <AlertDialogDescription>
+              &ldquo;{item.name || item.type}&rdquo; will be archived. It won&apos;t appear in
+              outfit suggestions or in your wardrobe by default. You can restore it at any time.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="px-0 py-2">
+            <Input
+              placeholder="Reason (optional, e.g. seasonal, worn out...)"
+              value={archiveReason}
+              onChange={(e) => setArchiveReason(e.target.value)}
+              maxLength={50}
+            />
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleArchive}
+              disabled={archiveItem.isPending}
+            >
+              {archiveItem.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+              ) : null}
+              Archive
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

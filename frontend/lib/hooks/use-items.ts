@@ -253,8 +253,27 @@ export function useArchiveItem() {
       }
       return api.post<Item>(`/items/${id}/archive`, { reason });
     },
-    onSuccess: () => {
+    onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ['items'] });
+      queryClient.invalidateQueries({ queryKey: ['item', variables.id] });
+    },
+  });
+}
+
+export function useRestoreItem() {
+  const queryClient = useQueryClient();
+  const { data: session } = useSession();
+
+  return useMutation({
+    mutationFn: async (id: string) => {
+      if (session?.accessToken) {
+        setAccessToken(session.accessToken as string);
+      }
+      return api.post<Item>(`/items/${id}/restore`, {});
+    },
+    onSuccess: (_, id) => {
+      queryClient.invalidateQueries({ queryKey: ['items'] });
+      queryClient.invalidateQueries({ queryKey: ['item', id] });
     },
   });
 }

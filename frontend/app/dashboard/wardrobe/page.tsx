@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import Image from 'next/image';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { Plus, Search, Heart, Grid3X3, Loader2, AlertCircle, RefreshCw, Droplets, ArrowUpDown, SlidersHorizontal, X } from 'lucide-react';
+import { Plus, Search, Heart, Grid3X3, Loader2, AlertCircle, RefreshCw, Droplets, ArrowUpDown, SlidersHorizontal, X, Archive } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
@@ -105,6 +105,13 @@ function ItemCard({
         {item.favorite && (
           <div className="absolute top-2 right-2 z-10">
             <Heart className="h-4 w-4 fill-red-500 text-red-500" />
+          </div>
+        )}
+        {item.is_archived && (
+          <div className="absolute bottom-2 left-2 z-10">
+            <div className="bg-amber-500/90 text-white rounded-full p-1" title="Archived">
+              <Archive className="h-3.5 w-3.5" />
+            </div>
           </div>
         )}
         {item.needs_wash && (
@@ -238,6 +245,7 @@ export default function WardrobePage() {
   const [sortIndex, setSortIndex] = useState(0);
   const [needsWash, setNeedsWash] = useState<boolean | undefined>(undefined);
   const [favoriteFilter, setFavoriteFilter] = useState<boolean | undefined>(undefined);
+  const [showArchived, setShowArchived] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const [page, setPage] = useState(1);
 
@@ -262,6 +270,7 @@ export default function WardrobePage() {
     setTypeFilter('all');
     setNeedsWash(undefined);
     setFavoriteFilter(undefined);
+    setShowArchived(false);
   }, [selectedMemberId]);
 
   const sortOption = SORT_OPTIONS[sortIndex];
@@ -271,7 +280,7 @@ export default function WardrobePage() {
     type: typeFilter !== 'all' ? typeFilter : undefined,
     needs_wash: needsWash,
     favorite: favoriteFilter,
-    is_archived: false,
+    is_archived: showArchived,
     sort_by: sortOption.value,
     sort_order: sortOption.order,
   };
@@ -280,6 +289,7 @@ export default function WardrobePage() {
     needsWash !== undefined,
     favoriteFilter !== undefined,
     typeFilter !== 'all',
+    showArchived,
   ].filter(Boolean).length;
 
   // Fetch own items or a family member's items depending on selection
@@ -313,7 +323,7 @@ export default function WardrobePage() {
   // Clear selection when filters change (but not page - allow cross-page selection)
   useEffect(() => {
     setSelection({ mode: 'none', selectedIds: new Set(), excludedIds: new Set() });
-  }, [search, typeFilter, needsWash, favoriteFilter, sortIndex]);
+  }, [search, typeFilter, needsWash, favoriteFilter, showArchived, sortIndex]);
 
   const handleRetry = (itemId: string) => {
     reanalyze.mutate(itemId);
@@ -370,7 +380,7 @@ export default function WardrobePage() {
           search: search || undefined,
           needs_wash: needsWash,
           favorite: favoriteFilter,
-          is_archived: false,
+          is_archived: showArchived,
         },
       };
     } else {
@@ -433,7 +443,7 @@ export default function WardrobePage() {
             )}
           </div>
           <p className="text-sm text-muted-foreground">
-            {total} item{total !== 1 ? 's' : ''} in {isViewingOwnWardrobe ? 'your' : `${selectedMember?.display_name ?? 'their'}'s`} wardrobe
+            {total} {showArchived ? 'archived' : ''} item{total !== 1 ? 's' : ''} in {isViewingOwnWardrobe ? 'your' : `${selectedMember?.display_name ?? 'their'}'s`} wardrobe
           </p>
           {(processingCount > 0 || errorCount > 0) && (
             <div className="flex items-center gap-2 mt-2">
@@ -616,6 +626,19 @@ export default function WardrobePage() {
               Favorites
             </Button>
 
+            <Button
+              variant={showArchived ? 'default' : 'outline'}
+              size="sm"
+              className="h-8 text-xs gap-1.5"
+              onClick={() => {
+                setShowArchived(!showArchived);
+                setPage(1);
+              }}
+            >
+              <Archive className="h-3.5 w-3.5" />
+              Archived
+            </Button>
+
             {activeFilterCount > 0 && (
               <Button
                 variant="ghost"
@@ -625,6 +648,7 @@ export default function WardrobePage() {
                   setTypeFilter('all');
                   setNeedsWash(undefined);
                   setFavoriteFilter(undefined);
+                  setShowArchived(false);
                   setPage(1);
                 }}
               >
@@ -656,10 +680,10 @@ export default function WardrobePage() {
           ))}
         </div>
       ) : items.length === 0 ? (
-        search || typeFilter !== 'all' || needsWash !== undefined || favoriteFilter !== undefined ? (
+        search || typeFilter !== 'all' || needsWash !== undefined || favoriteFilter !== undefined || showArchived ? (
           <div className="text-center py-8">
             <p className="text-muted-foreground">
-              No items found matching your filters.
+              {showArchived ? 'No archived items found.' : 'No items found matching your filters.'}
             </p>
             <Button
               variant="outline"
@@ -669,6 +693,7 @@ export default function WardrobePage() {
                 setTypeFilter('all');
                 setNeedsWash(undefined);
                 setFavoriteFilter(undefined);
+                setShowArchived(false);
               }}
             >
               Clear Filters
