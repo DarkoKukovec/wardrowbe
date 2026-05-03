@@ -222,7 +222,7 @@ class TestClothingTags:
             confidence=0.92,
             description="A classic navy blazer",
             brand="Hugo Boss",
-            model="Huge",
+            model="Modern Fit",
         )
         assert tags.type == "jacket"
         assert tags.subtype == "blazer"
@@ -230,4 +230,4 @@ class TestClothingTags:
         assert len(tags.colors) == 2
         assert tags.confidence == 0.92
         assert tags.brand == "Hugo Boss"
-        assert tags.model == "Huge"
+        assert tags.model == "Modern Fit"
