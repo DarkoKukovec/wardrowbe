@@ -18,20 +18,26 @@ def _build_prompt(
     custom_prompt: str | None = None,
 ) -> str:
     """Build a descriptive marketing photo prompt from item attributes."""
-    parts: list[str] = []
-    if color:
-        parts.append(color)
-    if material:
-        parts.append(material)
-    if pattern and pattern != "solid":
-        parts.append(pattern)
-    if item_type and item_type != "unknown":
-        parts.append(item_type)
+    canonical_type = item_type if item_type not in (None, "unknown") else "clothing item"
 
-    item_description = " ".join(parts) if parts else "clothing item"
+    attribute_parts: list[str] = []
+    if color:
+        attribute_parts.append(color)
+    if material:
+        attribute_parts.append(material)
+    if pattern and pattern != "solid":
+        attribute_parts.append(pattern)
+
+    if attribute_parts:
+        attributes = ", ".join(attribute_parts)
+        subject = f"a {canonical_type} — attributes: {attributes}"
+    else:
+        subject = f"a {canonical_type}"
+
     base = (
-        f"A {item_description}, presented as a professional e-commerce product photo: "
-        "clean white background, no wrinkles, perfectly flat-laid or ghost-mannequin style, "
+        f"Professional e-commerce product photo of exactly {subject}. "
+        f"The item is a {canonical_type} and must not be substituted with any other clothing type. "
+        "Clean white background, no wrinkles, perfectly flat-laid or ghost-mannequin style, "
         "studio lighting, sharp focus, no people, no mannequin visible, marketing quality."
     )
     if custom_prompt and custom_prompt.strip():
