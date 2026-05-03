@@ -1223,7 +1223,7 @@ export function ItemDetailDialog({ item, open, onOpenChange }: ItemDetailDialogP
           </AlertDialogHeader>
           <div className="px-0 py-2">
             <Input
-              placeholder="Reason (optional, e.g. seasonal, worn out…)"
+              placeholder="Reason (optional, e.g. seasonal, worn out...)"
               value={archiveReason}
               onChange={(e) => setArchiveReason(e.target.value)}
               maxLength={50}
