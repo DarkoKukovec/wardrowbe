@@ -80,6 +80,25 @@ class TestBuildPrompt:
         assert "checkered" in prompt
         assert "cap" in prompt
 
+    def test_subtype_overrides_type_in_prompt(self):
+        """subtype (e.g. 'watch') should take precedence over generic type ('accessories')."""
+        prompt = _build_prompt("accessories", "orange", None, None, subtype="watch")
+        assert "watch" in prompt
+        # 'watch' should appear at least twice (subject + must-not-substitute)
+        assert prompt.count("watch") >= 2
+        # The generic 'accessories' label should not appear
+        assert "accessories" not in prompt
+
+    def test_subtype_none_uses_type(self):
+        """When subtype is None the generic type is used as before."""
+        prompt = _build_prompt("accessories", "orange", None, None, subtype=None)
+        assert "accessories" in prompt
+
+    def test_subtype_with_attributes(self):
+        prompt = _build_prompt("accessories", "silver", None, None, subtype="watch")
+        assert "watch" in prompt
+        assert "silver" in prompt
+
 
 # ---------------------------------------------------------------------------
 # Schema unit tests

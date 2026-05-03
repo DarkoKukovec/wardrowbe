@@ -35,6 +35,7 @@ class ClothingTags(BaseModel):
     fit: str | None = None
     occasion: list[str] = []
     brand: str | None = None
+    model: str | None = None
     condition: str | None = None
     features: list[str] = []
     confidence: float = 0.0
@@ -425,10 +426,17 @@ class AIService:
         tags.style = validate_list(data.get("style", []), VALID_STYLES)
         tags.season = validate_list(data.get("season", []), VALID_SEASONS)
         tags.fit = validate_value(data.get("fit"), VALID_FIT)
+
+        raw_brand = data.get("brand")
+        tags.brand = str(raw_brand).strip() if raw_brand and str(raw_brand).strip() else None
+        raw_model = data.get("model")
+        tags.model = str(raw_model).strip() if raw_model and str(raw_model).strip() else None
+
         tags.confidence = compute_tag_completeness(tags)
 
         logger.info(
-            f"Parsed tags: type={tags.type}, color={tags.primary_color}, pattern={tags.pattern}"
+            f"Parsed tags: type={tags.type}, color={tags.primary_color}, pattern={tags.pattern}, "
+            f"brand={tags.brand}, model={tags.model}"
         )
         return tags
 

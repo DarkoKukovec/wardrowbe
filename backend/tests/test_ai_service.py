@@ -134,6 +134,67 @@ class TestTagParsing:
         tags = service._parse_tags_from_response(response)
         assert tags.formality is None
 
+    def test_parse_brand_detected(self):
+        """Test that brand is parsed from AI response."""
+        service = AIService()
+        response = """
+        {
+            "type": "sneakers",
+            "primary_color": "white",
+            "pattern": "solid",
+            "formality": "casual",
+            "brand": "Nike",
+            "model": "Air Force 1"
+        }
+        """
+        tags = service._parse_tags_from_response(response)
+        assert tags.brand == "Nike"
+        assert tags.model == "Air Force 1"
+
+    def test_parse_brand_null_returns_none(self):
+        """Test that null brand returns None."""
+        service = AIService()
+        response = """
+        {
+            "type": "shirt",
+            "primary_color": "blue",
+            "pattern": "solid",
+            "formality": "casual",
+            "brand": null,
+            "model": null
+        }
+        """
+        tags = service._parse_tags_from_response(response)
+        assert tags.brand is None
+        assert tags.model is None
+
+    def test_parse_brand_missing_returns_none(self):
+        """Test that missing brand key returns None (backwards compatibility)."""
+        service = AIService()
+        response = """
+        {
+            "type": "shirt",
+            "primary_color": "blue",
+            "pattern": "solid",
+            "formality": "casual"
+        }
+        """
+        tags = service._parse_tags_from_response(response)
+        assert tags.brand is None
+        assert tags.model is None
+
+    def test_parse_brand_whitespace_only_returns_none(self):
+        """Test that whitespace-only brand string returns None."""
+        service = AIService()
+        response = """
+        {
+            "type": "shirt",
+            "brand": "   "
+        }
+        """
+        tags = service._parse_tags_from_response(response)
+        assert tags.brand is None
+
 
 class TestClothingTags:
     """Tests for ClothingTags model."""
@@ -160,9 +221,13 @@ class TestClothingTags:
             season=["fall", "winter"],
             confidence=0.92,
             description="A classic navy blazer",
+            brand="Hugo Boss",
+            model="Huge",
         )
         assert tags.type == "jacket"
         assert tags.subtype == "blazer"
         assert tags.primary_color == "navy"
         assert len(tags.colors) == 2
         assert tags.confidence == 0.92
+        assert tags.brand == "Hugo Boss"
+        assert tags.model == "Huge"
