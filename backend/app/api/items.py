@@ -991,6 +991,7 @@ async def enhance_item_photo(
     try:
         image_data = await gen_service.generate(
             item_type=item.type,
+            subtype=item.subtype,
             color=item.primary_color,
             pattern=item.tags.get("pattern") if item.tags else None,
             material=item.tags.get("material") if item.tags else None,

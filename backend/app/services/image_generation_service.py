@@ -16,9 +16,12 @@ def _build_prompt(
     pattern: str | None,
     material: str | None,
     custom_prompt: str | None = None,
+    subtype: str | None = None,
 ) -> str:
     """Build a descriptive marketing photo prompt from item attributes."""
     canonical_type = item_type if item_type not in (None, "unknown") else "clothing item"
+    # Use subtype as the specific item label when available (e.g. "watch" over "accessories")
+    specific_type = subtype if subtype else canonical_type
 
     attribute_parts: list[str] = []
     if color:
@@ -30,13 +33,13 @@ def _build_prompt(
 
     if attribute_parts:
         attributes = ", ".join(attribute_parts)
-        subject = f"a {canonical_type} — attributes: {attributes}"
+        subject = f"a {specific_type} — attributes: {attributes}"
     else:
-        subject = f"a {canonical_type}"
+        subject = f"a {specific_type}"
 
     base = (
         f"Professional e-commerce product photo of exactly {subject}. "
-        f"The item is a {canonical_type} and must not be substituted with any other clothing type. "
+        f"The item is a {specific_type} and must not be substituted with any other item type. "
         "Clean white background, no wrinkles, perfectly flat-laid or ghost-mannequin style, "
         "studio lighting, sharp focus, no people, no mannequin visible, marketing quality."
     )
@@ -68,12 +71,15 @@ class ImageGenerationService:
         pattern: str | None = None,
         material: str | None = None,
         custom_prompt: str | None = None,
+        subtype: str | None = None,
     ) -> bytes:
         """
         Generate a marketing-style photo of a clothing item.
 
         Args:
             item_type: Clothing type (e.g. "shirt").
+            subtype: More specific item name (e.g. "watch"), used instead of item_type in the
+                     prompt when provided to avoid generic substitutions.
             color: Primary colour.
             pattern: Pattern descriptor.
             material: Fabric/material.
@@ -89,7 +95,7 @@ class ImageGenerationService:
                 "Set AI_BASE_URL and AI_API_KEY to enable this feature."
             )
 
-        prompt = _build_prompt(item_type, color, pattern, material, custom_prompt)
+        prompt = _build_prompt(item_type, color, pattern, material, custom_prompt, subtype)
         model = self.settings.ai_image_generation_model
 
         logger.info(f"Generating marketing photo with model={model}, prompt={prompt!r}")
