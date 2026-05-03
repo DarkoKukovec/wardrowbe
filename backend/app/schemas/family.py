@@ -1,13 +1,11 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TYPE_CHECKING
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
-if TYPE_CHECKING:
-    from app.schemas.item import ItemResponse
+from app.schemas.item import ItemResponse
 
 
 class FamilyMember(BaseModel):
