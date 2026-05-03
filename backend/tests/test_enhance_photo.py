@@ -64,8 +64,10 @@ class TestBuildPrompt:
 
     def test_custom_prompt_appended(self):
         prompt = _build_prompt("shirt", "white", None, None, "show folded")
-        assert "show folded" in prompt
-        assert "Additional instructions:" in prompt
+        base_end = "marketing quality."
+        assert base_end in prompt
+        assert prompt.index(base_end) < prompt.index("show folded")
+        assert "Additional instructions: show folded" in prompt
 
     def test_custom_prompt_whitespace_only_ignored(self):
         prompt = _build_prompt("shirt", "white", None, None, "   ")

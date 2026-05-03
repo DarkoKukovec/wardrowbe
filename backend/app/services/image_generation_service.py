@@ -18,7 +18,7 @@ def _build_prompt(
     custom_prompt: str | None = None,
 ) -> str:
     """Build a descriptive marketing photo prompt from item attributes."""
-    canonical_type = item_type if (item_type and item_type != "unknown") else "clothing item"
+    canonical_type = item_type if item_type not in (None, "unknown") else "clothing item"
 
     attribute_parts: list[str] = []
     if color:
