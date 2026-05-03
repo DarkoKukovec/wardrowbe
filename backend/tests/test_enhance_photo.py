@@ -12,7 +12,71 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.item import ClothingItem, ItemStatus
 from app.schemas.item import ApplyPhotoRequest
+from app.services.image_generation_service import _build_prompt
 from app.services.image_service import ImageService
+
+
+# ---------------------------------------------------------------------------
+# _build_prompt unit tests
+# ---------------------------------------------------------------------------
+
+
+class TestBuildPrompt:
+    def test_item_type_appears_prominently(self):
+        prompt = _build_prompt("cap", "blue", None, None)
+        assert "cap" in prompt
+        # The item type should appear twice: once in subject, once in the must-not-substitute clause
+        assert prompt.count("cap") >= 2
+
+    def test_item_type_not_substituted_clause_present(self):
+        prompt = _build_prompt("cap", "blue", None, None)
+        assert "must not be substituted" in prompt
+
+    def test_color_included_in_attributes(self):
+        prompt = _build_prompt("shirt", "red", None, None)
+        assert "red" in prompt
+
+    def test_material_included_in_attributes(self):
+        prompt = _build_prompt("jacket", None, None, "leather")
+        assert "leather" in prompt
+
+    def test_pattern_included_when_not_solid(self):
+        prompt = _build_prompt("shirt", None, "striped", None)
+        assert "striped" in prompt
+
+    def test_solid_pattern_excluded(self):
+        prompt = _build_prompt("shirt", "blue", "solid", None)
+        assert "solid" not in prompt
+
+    def test_unknown_item_type_falls_back_to_clothing_item(self):
+        prompt = _build_prompt("unknown", "green", None, None)
+        assert "clothing item" in prompt
+        assert "unknown" not in prompt
+
+    def test_none_item_type_falls_back_to_clothing_item(self):
+        prompt = _build_prompt(None, "green", None, None)
+        assert "clothing item" in prompt
+
+    def test_no_attributes_produces_clean_prompt(self):
+        prompt = _build_prompt("trousers", None, None, None)
+        assert "trousers" in prompt
+        assert "attributes:" not in prompt
+
+    def test_custom_prompt_appended(self):
+        prompt = _build_prompt("shirt", "white", None, None, "show folded")
+        assert "show folded" in prompt
+        assert "Additional instructions:" in prompt
+
+    def test_custom_prompt_whitespace_only_ignored(self):
+        prompt = _build_prompt("shirt", "white", None, None, "   ")
+        assert "Additional instructions:" not in prompt
+
+    def test_all_attributes_combined(self):
+        prompt = _build_prompt("cap", "blue", "checkered", "wool")
+        assert "blue" in prompt
+        assert "wool" in prompt
+        assert "checkered" in prompt
+        assert "cap" in prompt
 
 
 # ---------------------------------------------------------------------------
