@@ -309,8 +309,38 @@ See the [k8s/](k8s/) directory for Kubernetes manifests including:
 | `BG_REMOVAL_URL` | URL for HTTP bg removal provider | If http |
 | `BG_REMOVAL_API_KEY` | API key for HTTP bg removal provider | No |
 | `AI_IMAGE_GENERATION_MODEL` | Model name for marketing photo generation (default: `dall-e-3`) | No |
+| `STORAGE_BACKEND` | Where garment images live: `filesystem` (default) or `s3` | No |
+| `STORAGE_PATH` | Root directory for images when `STORAGE_BACKEND=filesystem` (default: `/data/wardrobe`) | No |
+| `S3_ENDPOINT` | S3 endpoint URL (e.g. `https://s3.example.com`) | If s3 |
+| `S3_BUCKET` | Bucket holding the images | If s3 |
+| `S3_REGION` | Bucket region (default: `us-east-1`) | No |
+| `S3_ACCESS_KEY` | S3 access key ID | If s3 |
+| `S3_SECRET_KEY` | S3 secret access key | If s3 |
+| `S3_FORCE_PATH_STYLE` | Use path-style addressing, needed by MinIO-style servers (default: `true`) | No |
 
 See [.env.example](.env.example) for all options.
+
+### Image Storage
+
+Garment images are stored through a pluggable backend selected by
+`STORAGE_BACKEND`:
+
+- `filesystem` (default) — files under `STORAGE_PATH`, exactly as before.
+- `s3` — any S3-compatible object store (MinIO, Silo, AWS S3).
+
+**S3 keys are byte-identical to the on-disk relative paths.** The
+`image_path` / `medium_path` / `thumbnail_path` values in the database
+(`{user_id}/{filename}`) are used verbatim as object keys, so migrating an
+existing deployment is a plain mirror of the uploads tree and requires **no
+database rewrite**:
+
+```bash
+mc mirror /data/wardrobe myminio/wardrowbe
+```
+
+Selecting `STORAGE_BACKEND=s3` without `S3_ENDPOINT`, `S3_BUCKET`,
+`S3_ACCESS_KEY` and `S3_SECRET_KEY` aborts startup — it never falls back to
+writing on local disk.
 
 ### Background Removal (Optional)
 
