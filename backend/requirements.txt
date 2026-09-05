@@ -21,6 +21,9 @@ httpx>=0.26.0
 pillow>=10.2.0
 pillow-heif>=0.14.0
 
+# Object storage (STORAGE_BACKEND=s3)
+aioboto3>=13.0.0
+
 # Background jobs
 redis>=5.0.1
 arq>=0.25.0

@@ -67,8 +67,20 @@ class Settings(BaseSettings):
     smtp_from_name: str = "Wardrowbe"
     smtp_from_email: str | None = None
     # Storage
+    # STORAGE_BACKEND selects where garment images live: "filesystem" (default)
+    # or "s3". Object keys are identical in both cases — an S3 key is exactly the
+    # path relative to STORAGE_PATH — so switching backends is a plain data copy.
+    storage_backend: str = Field(default="filesystem")
     storage_path: str = Field(default="/data/wardrobe")
     max_upload_size_mb: int = Field(default=10)
+
+    # S3 storage (required when STORAGE_BACKEND=s3)
+    s3_endpoint: str = Field(default="")
+    s3_bucket: str = Field(default="")
+    s3_region: str = Field(default="us-east-1")
+    s3_access_key: str = Field(default="")
+    s3_secret_key: str = Field(default="")
+    s3_force_path_style: bool = Field(default=True)
 
     # Background removal
     bg_removal_provider: str = Field(default="rembg")  # "rembg" or "http"
@@ -85,12 +97,45 @@ class Settings(BaseSettings):
     original_max_size: int = 2400
     image_quality: int = 90
 
+    def validate_storage(self) -> None:
+        """
+        Fail loudly on a half-configured storage backend.
+
+        A partially configured S3 backend must never degrade to writing on local
+        disk: the images would land somewhere nobody backs up and nothing would
+        say so.
+        """
+        backend = (self.storage_backend or "").strip().lower()
+        if backend == "filesystem":
+            return
+
+        if backend != "s3":
+            raise RuntimeError(
+                f"Unknown STORAGE_BACKEND: {self.storage_backend!r}. "
+                "Supported backends: filesystem, s3."
+            )
+
+        required = {
+            "S3_ENDPOINT": self.s3_endpoint,
+            "S3_BUCKET": self.s3_bucket,
+            "S3_ACCESS_KEY": self.s3_access_key,
+            "S3_SECRET_KEY": self.s3_secret_key,
+        }
+        missing = [name for name, value in required.items() if not value]
+        if missing:
+            raise RuntimeError(
+                "STORAGE_BACKEND=s3 but these variables are unset: "
+                f"{', '.join(missing)}."
+            )
+
     def validate_security(self) -> str | None:
         if self.secret_key == DEFAULT_SECRET_KEY and not self.debug:
             raise RuntimeError(
                 "SECRET_KEY is still the default value. "
                 "Set a secure SECRET_KEY or enable DEBUG mode for development."
             )
+
+        self.validate_storage()
 
         oidc_issuer = bool(self.oidc_issuer_url)
         oidc_client = bool(self.oidc_client_id)
