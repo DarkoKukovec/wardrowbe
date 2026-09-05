@@ -24,6 +24,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.config import get_settings
 from app.models.item import ClothingItem
+from app.services.storage import ObjectNotFoundError, get_storage_backend
 
 # New sizes (must match image_service.py)
 SIZES = {
@@ -63,7 +64,7 @@ def resize_image(image: Image.Image, max_size: tuple[int, int], quality: int) ->
 async def regenerate_all():
     """Regenerate thumbnails for all items."""
     settings = get_settings()
-    storage_path = Path(settings.storage_path)
+    storage = get_storage_backend()
 
     # Create async engine
     engine = create_async_engine(str(settings.database_url))
@@ -82,30 +83,26 @@ async def regenerate_all():
 
         for item in items:
             try:
-                # Get original image path
-                original_path = storage_path / item.image_path
-
-                if not original_path.exists():
+                # Load the original through the storage backend. `item.image_path`
+                # is the object key verbatim on every backend.
+                try:
+                    original = await storage.get(item.image_path)
+                except ObjectNotFoundError:
                     print(f"  [{item.id}] Original not found: {item.image_path}")
                     skipped += 1
                     continue
 
-                # Load original image
-                image = Image.open(original_path)
+                image = Image.open(BytesIO(original))
 
-                # Get base path for derived images
-                base_path = original_path.parent
-                base_name = original_path.stem.replace("_medium", "").replace("_thumb", "")
+                # Derive the sibling keys from the original key
+                base_key = item.image_path.rsplit(".", 1)[0]
+                base_key = base_key.removesuffix("_medium").removesuffix("_thumb")
 
-                # Regenerate thumbnail
-                thumb_path = base_path / f"{base_name}_thumb.jpg"
                 thumb_data = resize_image(image, SIZES["thumbnail"], QUALITY["thumbnail"])
-                thumb_path.write_bytes(thumb_data)
+                await storage.put(f"{base_key}_thumb.jpg", thumb_data)
 
-                # Regenerate medium
-                medium_path = base_path / f"{base_name}_medium.jpg"
                 medium_data = resize_image(image, SIZES["medium"], QUALITY["medium"])
-                medium_path.write_bytes(medium_data)
+                await storage.put(f"{base_key}_medium.jpg", medium_data)
 
                 print(f"  [{item.id}] Regenerated: {item.name or 'unnamed'}")
                 success += 1
