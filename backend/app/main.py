@@ -12,6 +12,7 @@ from pydantic import ValidationError
 from app.api.router import api_router
 from app.config import get_settings
 from app.database import engine
+from app.services.storage import close_storage_backend
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -24,6 +25,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.error("Configuration: %s", warning)
     logger.info("Auth mode: %s", settings.get_auth_mode())
     yield
+    await close_storage_backend()
     await engine.dispose()
 
 

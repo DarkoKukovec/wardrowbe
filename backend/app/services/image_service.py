@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 from datetime import datetime
 from io import BytesIO
@@ -7,6 +8,12 @@ import imagehash
 from PIL import Image
 
 from app.config import get_settings
+from app.services.storage import (
+    FilesystemStorage,
+    ObjectNotFoundError,
+    StorageBackend,
+    get_storage_backend,
+)
 
 settings = get_settings()
 
@@ -20,6 +27,13 @@ SIZES = {
     "original": (2400, 2400),
 }
 
+# JPEG quality per size. Highest for the original, lowest for the thumbnail.
+QUALITY = {
+    "original": 95,
+    "medium": 90,
+    "thumbnail": 88,
+}
+
 ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif"}
 ALLOWED_MIME_TYPES = {
     "image/jpeg",
@@ -31,20 +45,43 @@ ALLOWED_MIME_TYPES = {
 
 
 class ImageService:
-    def __init__(self, storage_path: str | None = None):
-        self.storage_path = Path(storage_path or settings.storage_path)
-        self.storage_path.mkdir(parents=True, exist_ok=True)
+    """
+    Garment image processing.
 
-    def _get_user_path(self, user_id: uuid.UUID) -> Path:
-        user_path = self.storage_path / str(user_id)
-        user_path.mkdir(parents=True, exist_ok=True)
-        return user_path
+    All I/O goes through a StorageBackend and is addressed by relative key
+    (``{user_id}/{filename}``) — exactly the value stored in the
+    ``image_path`` / ``medium_path`` / ``thumbnail_path`` columns. Those keys
+    are identical on the filesystem and in S3.
+    """
+
+    def __init__(
+        self,
+        storage_path: str | None = None,
+        backend: StorageBackend | None = None,
+    ):
+        if backend is not None:
+            self.backend = backend
+        elif storage_path is not None:
+            # Explicit filesystem root — used by tooling and tests.
+            self.backend = FilesystemStorage(storage_path)
+        else:
+            self.backend = get_storage_backend()
 
     def _generate_filename(self, extension: str = ".jpg") -> str:
         """Generate a unique filename."""
         timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
         unique_id = uuid.uuid4().hex[:8]
         return f"{timestamp}_{unique_id}{extension}"
+
+    @staticmethod
+    def variant_keys(image_key: str) -> dict[str, str]:
+        """Derive the medium/thumbnail keys that accompany an original key."""
+        base = image_key.rsplit(".", 1)[0]
+        return {
+            "original": image_key,
+            "medium": f"{base}_medium.jpg",
+            "thumbnail": f"{base}_thumb.jpg",
+        }
 
     def _convert_heic(self, image_data: bytes) -> Image.Image:
         """Convert HEIC/HEIF to PIL Image."""
@@ -55,6 +92,13 @@ class ImageService:
         except ImportError:
             pass
 
+        return Image.open(BytesIO(image_data))
+
+    def _open(self, image_data: bytes, original_filename: str = "") -> Image.Image:
+        """Open image bytes, routing HEIC/HEIF through pillow-heif."""
+        ext = Path(original_filename).suffix.lower()
+        if ext in (".heic", ".heif"):
+            return self._convert_heic(image_data)
         return Image.open(BytesIO(image_data))
 
     def _resize_image(
@@ -82,6 +126,18 @@ class ImageService:
         image.save(output, format="JPEG", quality=quality, optimize=True)
         return output.getvalue()
 
+    def _render_variants(self, image: Image.Image) -> dict[str, bytes]:
+        """Render original/medium/thumbnail JPEG bytes from a loaded image."""
+        return {
+            size_name: self._resize_image(image.copy(), max_size, quality=QUALITY[size_name])
+            for size_name, max_size in SIZES.items()
+        }
+
+    async def _store_variants(self, keys: dict[str, str], variants: dict[str, bytes]) -> None:
+        await asyncio.gather(
+            *(self.backend.put(keys[size_name], data) for size_name, data in variants.items())
+        )
+
     async def process_and_store(
         self,
         user_id: uuid.UUID,
@@ -103,63 +159,40 @@ class ImageService:
         if ext not in ALLOWED_EXTENSIONS:
             raise ValueError(f"Unsupported file type: {ext}")
 
-        # Load image
-        if ext in (".heic", ".heif"):
-            image = self._convert_heic(image_data)
-        else:
-            image = Image.open(BytesIO(image_data))
+        image = self._open(image_data, original_filename)
 
         # Generate base filename
         base_filename = self._generate_filename(".jpg")
-        base_name = base_filename.rsplit(".", 1)[0]
+        keys = self.variant_keys(f"{user_id}/{base_filename}")
 
-        user_path = self._get_user_path(user_id)
-        paths = {}
-
-        # Process and save each size
-        for size_name, max_size in SIZES.items():
-            if size_name == "original":
-                suffix = ""
-                quality = 95  # Highest quality for original
-            elif size_name == "medium":
-                suffix = "_medium"
-                quality = 90
-            else:
-                suffix = "_thumb"
-                quality = 88  # Good quality for thumbnails
-
-            filename = f"{base_name}{suffix}.jpg"
-            file_path = user_path / filename
-
-            # For original, preserve as much quality as possible
-            # For others, resize with appropriate quality
-            resized_data = self._resize_image(image.copy(), max_size, quality=quality)
-            file_path.write_bytes(resized_data)
-
-            # Store relative path
-            paths[size_name] = f"{user_id}/{filename}"
+        variants = await asyncio.to_thread(self._render_variants, image)
+        await self._store_variants(keys, variants)
 
         # Compute perceptual hash for duplicate detection
         image_hash = self.compute_phash(image_data, original_filename)
 
         return {
-            "image_path": paths["original"],
-            "medium_path": paths["medium"],
-            "thumbnail_path": paths["thumbnail"],
+            "image_path": keys["original"],
+            "medium_path": keys["medium"],
+            "thumbnail_path": keys["thumbnail"],
             "image_hash": image_hash,
         }
 
-    def get_image_path(self, relative_path: str) -> Path:
-        """Get full path for an image."""
-        return self.storage_path / relative_path
+    async def read_image(self, key: str, label: str = "Image") -> bytes:
+        """Read the bytes stored at *key*. Raises ValueError if it is absent."""
+        try:
+            return await self.backend.get(key)
+        except ObjectNotFoundError as e:
+            raise ValueError(f"{label} not found: {key}") from e
 
-    def delete_images(self, paths: dict[str, str | None]) -> None:
+    async def exists(self, key: str) -> bool:
+        return await self.backend.exists(key)
+
+    async def delete_images(self, paths: dict[str, str | None]) -> None:
         """Delete all image files for an item."""
-        for path in paths.values():
-            if path:
-                full_path = self.storage_path / path
-                if full_path.exists():
-                    full_path.unlink()
+        keys = [path for path in paths.values() if path]
+        if keys:
+            await asyncio.gather(*(self.backend.delete(key) for key in keys))
 
     def validate_image(self, image_data: bytes, content_type: str) -> bool:
         """Validate image data and content type."""
@@ -187,26 +220,13 @@ class ImageService:
 
         Returns a 16-character hex string representing the 64-bit hash.
         """
-        ext = Path(original_filename).suffix.lower()
-
-        if ext in (".heic", ".heif"):
-            image = self._convert_heic(image_data)
-        else:
-            image = Image.open(BytesIO(image_data))
+        image = self._open(image_data, original_filename)
 
         # Convert to RGB if needed for consistent hashing
         if image.mode != "RGB":
             image = image.convert("RGB")
 
         # Compute perceptual hash
-        phash = imagehash.phash(image)
-        return str(phash)
-
-    def compute_phash_from_path(self, image_path: Path) -> str:
-        """Compute pHash from a file path."""
-        image = Image.open(image_path)
-        if image.mode != "RGB":
-            image = image.convert("RGB")
         phash = imagehash.phash(image)
         return str(phash)
 
@@ -233,194 +253,146 @@ class ImageService:
         """
         return ImageService.hash_distance(hash1, hash2) <= threshold
 
-    def remove_background(
+    def _composite_on_background(
+        self,
+        image_data: bytes,
+        bg_color: tuple[int, int, int],
+    ) -> Image.Image:
+        """Cut the subject out of *image_data* and paste it on a solid colour."""
+        from app.services.background_removal import get_provider
+
+        image = Image.open(BytesIO(image_data)).convert("RGB")
+        result = get_provider().remove(image)
+
+        background = Image.new("RGBA", result.size, (*bg_color, 255))
+        background.paste(result, mask=result.split()[3])
+        return background.convert("RGB")
+
+    async def remove_background(
         self,
         image_path: str,
         bg_color: tuple[int, int, int] = (255, 255, 255),
     ) -> dict[str, str]:
-        from app.services.background_removal import get_provider
+        """Replace an item's image with a background-removed version, in place."""
+        keys = self.variant_keys(image_path)
+        original = await self.read_image(image_path)
 
-        base_path = image_path.rsplit(".", 1)[0]
+        def _render() -> dict[str, bytes]:
+            final = self._composite_on_background(original, bg_color)
+            return self._render_variants(final)
 
-        original_full = self.storage_path / image_path
-        medium_path = f"{base_path}_medium.jpg"
-        medium_full = self.storage_path / medium_path
-        thumb_path = f"{base_path}_thumb.jpg"
-        thumb_full = self.storage_path / thumb_path
-
-        if not original_full.exists():
-            raise ValueError(f"Image not found: {image_path}")
-
-        image = Image.open(original_full).convert("RGB")
-        provider = get_provider()
-        result = provider.remove(image)
-
-        # Composite onto solid color background
-        background = Image.new("RGBA", result.size, (*bg_color, 255))
-        background.paste(result, mask=result.split()[3])
-        final = background.convert("RGB")
-
-        for size_name, max_size in SIZES.items():
-            if size_name == "original":
-                file_path = original_full
-                quality = 95
-            elif size_name == "medium":
-                file_path = medium_full
-                quality = 90
-            else:
-                file_path = thumb_full
-                quality = 88
-
-            img_copy = final.copy()
-            img_copy.thumbnail(max_size, Image.Resampling.LANCZOS)
-
-            output = BytesIO()
-            img_copy.save(output, format="JPEG", quality=quality, optimize=True)
-            file_path.write_bytes(output.getvalue())
+        variants = await asyncio.to_thread(_render)
+        await self._store_variants(keys, variants)
 
         return {
-            "image_path": image_path,
-            "medium_path": medium_path,
-            "thumbnail_path": thumb_path,
+            "image_path": keys["original"],
+            "medium_path": keys["medium"],
+            "thumbnail_path": keys["thumbnail"],
         }
 
-    def rotate_image(self, image_path: str, direction: str = "cw") -> dict[str, str]:
+    async def render_background_removed(
+        self,
+        image_path: str,
+        bg_color: tuple[int, int, int] = (255, 255, 255),
+    ) -> bytes:
+        """
+        Background-remove an item's image and return the JPEG bytes.
+
+        Nothing is stored — the caller decides whether the result becomes a
+        preview or replaces the original.
+        """
+        original = await self.read_image(image_path)
+
+        def _render() -> bytes:
+            final = self._composite_on_background(original, bg_color)
+            buf = BytesIO()
+            final.save(buf, format="JPEG", quality=95, optimize=True)
+            return buf.getvalue()
+
+        return await asyncio.to_thread(_render)
+
+    async def rotate_image(self, image_path: str, direction: str = "cw") -> dict[str, str]:
         """
         Rotate an image and regenerate all sizes.
 
         Args:
-            image_path: Relative path to the original image (e.g., "user_id/filename.jpg")
+            image_path: Relative key of the original image (e.g., "user_id/filename.jpg")
             direction: "cw" for clockwise 90°, "ccw" for counter-clockwise 90°
 
         Returns:
             dict with updated paths (same as input since we overwrite)
         """
-        # Parse paths from original
-        # Original: user_id/filename.jpg
-        # Medium: user_id/filename_medium.jpg
-        # Thumbnail: user_id/filename_thumb.jpg
-        base_path = image_path.rsplit(".", 1)[0]  # Remove extension
+        keys = self.variant_keys(image_path)
+        original = await self.read_image(image_path)
 
-        original_full = self.storage_path / image_path
-        medium_path = f"{base_path}_medium.jpg"
-        medium_full = self.storage_path / medium_path
-        thumb_path = f"{base_path}_thumb.jpg"
-        thumb_full = self.storage_path / thumb_path
+        # PIL rotates counter-clockwise by default
+        angle = -90 if direction == "cw" else 90
 
-        if not original_full.exists():
-            raise ValueError(f"Image not found: {image_path}")
+        def _render() -> dict[str, bytes]:
+            image = Image.open(BytesIO(original))
 
-        # Determine rotation angle
-        angle = -90 if direction == "cw" else 90  # PIL rotates counter-clockwise by default
+            # Convert to RGB if necessary
+            if image.mode in ("RGBA", "P", "LA"):
+                background = Image.new("RGB", image.size, (255, 255, 255))
+                if image.mode == "P":
+                    image = image.convert("RGBA")
+                background.paste(
+                    image, mask=image.split()[-1] if image.mode == "RGBA" else None
+                )
+                image = background
+            elif image.mode != "RGB":
+                image = image.convert("RGB")
 
-        # Load and rotate original
-        image = Image.open(original_full)
+            return self._render_variants(image.rotate(angle, expand=True))
 
-        # Convert to RGB if necessary
-        if image.mode in ("RGBA", "P", "LA"):
-            background = Image.new("RGB", image.size, (255, 255, 255))
-            if image.mode == "P":
-                image = image.convert("RGBA")
-            background.paste(image, mask=image.split()[-1] if image.mode == "RGBA" else None)
-            image = background
-        elif image.mode != "RGB":
-            image = image.convert("RGB")
-
-        # Rotate
-        rotated = image.rotate(angle, expand=True)
-
-        # Save all sizes
-        for size_name, max_size in SIZES.items():
-            if size_name == "original":
-                file_path = original_full
-                quality = 95
-            elif size_name == "medium":
-                file_path = medium_full
-                quality = 90
-            else:
-                file_path = thumb_full
-                quality = 88
-
-            # Resize
-            img_copy = rotated.copy()
-            img_copy.thumbnail(max_size, Image.Resampling.LANCZOS)
-
-            # Save
-            output = BytesIO()
-            img_copy.save(output, format="JPEG", quality=quality, optimize=True)
-            file_path.write_bytes(output.getvalue())
+        variants = await asyncio.to_thread(_render)
+        await self._store_variants(keys, variants)
 
         return {
-            "image_path": image_path,
-            "medium_path": medium_path,
-            "thumbnail_path": thumb_path,
+            "image_path": keys["original"],
+            "medium_path": keys["medium"],
+            "thumbnail_path": keys["thumbnail"],
         }
 
-    def save_temp_image(self, user_id: uuid.UUID, image_data: bytes) -> str:
+    async def save_temp_image(self, user_id: uuid.UUID, image_data: bytes) -> str:
         """
-        Save raw image bytes to a temporary file in the user's storage folder.
+        Save raw image bytes to a temporary object in the user's storage prefix.
 
-        Returns the relative path to the temp file (e.g. "user_id/temp_<uuid>.jpg").
+        Returns the relative key of the temp object (e.g. "user_id/temp_<uuid>.jpg").
         """
-        user_path = self._get_user_path(user_id)
-        filename = f"temp_{uuid.uuid4().hex}.jpg"
-        file_path = user_path / filename
-        file_path.write_bytes(image_data)
-        return f"{user_id}/{filename}"
+        key = f"{user_id}/temp_{uuid.uuid4().hex}.jpg"
+        await self.backend.put(key, image_data)
+        return key
 
-    def apply_temp_image(self, item_image_path: str, temp_path: str) -> dict[str, str]:
+    async def apply_temp_image(self, item_image_path: str, temp_path: str) -> dict[str, str]:
         """
         Replace an item's image files with the image stored at *temp_path*.
 
-        Regenerates medium and thumbnail variants in-place (same filenames as the
-        original) and deletes the temp file afterwards.
+        Regenerates medium and thumbnail variants in-place (same keys as the
+        original) and deletes the temp object afterwards.
 
-        Returns a dict with the (unchanged) relative paths for original/medium/thumb.
-        Raises ValueError if either path does not exist.
+        Returns a dict with the (unchanged) relative keys for original/medium/thumb.
+        Raises ValueError if either object does not exist.
         """
-        temp_full = self.storage_path / temp_path
-        if not temp_full.exists():
-            raise ValueError(f"Temp image not found: {temp_path}")
+        temp_data = await self.read_image(temp_path, label="Temp image")
 
-        base_path = item_image_path.rsplit(".", 1)[0]
-        original_full = self.storage_path / item_image_path
-        medium_path = f"{base_path}_medium.jpg"
-        medium_full = self.storage_path / medium_path
-        thumb_path = f"{base_path}_thumb.jpg"
-        thumb_full = self.storage_path / thumb_path
-
-        if not original_full.exists():
+        keys = self.variant_keys(item_image_path)
+        if not await self.backend.exists(item_image_path):
             raise ValueError(f"Item image not found: {item_image_path}")
 
-        image = Image.open(temp_full).convert("RGB")
+        def _render() -> dict[str, bytes]:
+            return self._render_variants(Image.open(BytesIO(temp_data)).convert("RGB"))
 
-        for size_name, max_size in SIZES.items():
-            if size_name == "original":
-                file_path = original_full
-                quality = 95
-            elif size_name == "medium":
-                file_path = medium_full
-                quality = 90
-            else:
-                file_path = thumb_full
-                quality = 88
-
-            img_copy = image.copy()
-            img_copy.thumbnail(max_size, Image.Resampling.LANCZOS)
-
-            output = BytesIO()
-            img_copy.save(output, format="JPEG", quality=quality, optimize=True)
-            file_path.write_bytes(output.getvalue())
-
-        temp_full.unlink(missing_ok=True)
+        variants = await asyncio.to_thread(_render)
+        await self._store_variants(keys, variants)
+        await self.backend.delete(temp_path)
 
         return {
-            "image_path": item_image_path,
-            "medium_path": medium_path,
-            "thumbnail_path": thumb_path,
+            "image_path": keys["original"],
+            "medium_path": keys["medium"],
+            "thumbnail_path": keys["thumbnail"],
         }
 
-    def discard_temp_image(self, temp_path: str) -> None:
+    async def discard_temp_image(self, temp_path: str) -> None:
         """Delete a temporary image if it still exists."""
-        temp_full = self.storage_path / temp_path
-        temp_full.unlink(missing_ok=True)
+        await self.backend.delete(temp_path)
