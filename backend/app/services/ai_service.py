@@ -302,12 +302,16 @@ class AIService:
             headers["Authorization"] = f"Bearer {self.api_key}"
         return headers
 
-    def _preprocess_image(self, image_path: str | Path) -> str:
+    def _preprocess_image(self, image: bytes | str | Path) -> str:
         """
         Preprocess image for AI analysis.
+
+        Accepts raw image bytes (the normal path — the storage backend hands us
+        bytes) or a filesystem path, for callers that still hold one.
         Returns base64-encoded JPEG string.
         """
-        with Image.open(image_path) as img:
+        source: io.BytesIO | str | Path = io.BytesIO(image) if isinstance(image, bytes) else image
+        with Image.open(source) as img:
             # Convert to RGB if necessary
             if img.mode != "RGB":
                 img = img.convert("RGB")
@@ -501,8 +505,8 @@ class AIService:
 
         return None, last_error, None
 
-    async def analyze_image(self, image_path: str | Path) -> ClothingTags:
-        image_base64 = self._preprocess_image(image_path)
+    async def analyze_image(self, image: bytes | str | Path) -> ClothingTags:
+        image_base64 = self._preprocess_image(image)
 
         # System/user separation for injection protection
         messages_tags = [

@@ -1,4 +1,3 @@
-import asyncio
 import logging
 from datetime import UTC, datetime
 from typing import Annotated
@@ -9,7 +8,6 @@ from arq import create_pool
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import get_settings
 from app.database import get_db
 from app.models.user import User
 from app.schemas.item import (
@@ -40,7 +38,6 @@ from app.utils.auth import get_current_user
 from app.workers.settings import get_redis_settings
 
 logger = logging.getLogger(__name__)
-settings = get_settings()
 
 router = APIRouter(prefix="/items", tags=["Items"])
 
@@ -174,11 +171,10 @@ async def create_item(
     try:
         redis = await create_pool(get_redis_settings())
         try:
-            full_image_path = f"{settings.storage_path}/{image_paths['image_path']}"
             await redis.enqueue_job(
                 "tag_item_image",
                 str(item.id),
-                full_image_path,
+                image_paths["image_path"],
                 _queue_name="arq:tagging",
             )
             logger.info(f"Queued AI tagging job for item {item.id}")
@@ -280,11 +276,10 @@ async def bulk_create_items(
                 # Queue AI tagging job
                 if redis:
                     try:
-                        full_image_path = f"{settings.storage_path}/{image_paths['image_path']}"
                         await redis.enqueue_job(
                             "tag_item_image",
                             str(item.id),
-                            full_image_path,
+                            image_paths["image_path"],
                             _queue_name="arq:tagging",
                         )
                         logger.info(f"Queued AI tagging for bulk item {item.id}")
@@ -368,7 +363,7 @@ async def bulk_delete_items(
                 continue
 
             # Delete images
-            image_service.delete_images(
+            await image_service.delete_images(
                 {
                     "image_path": item.image_path,
                     "medium_path": item.medium_path,
@@ -447,11 +442,10 @@ async def bulk_analyze_items(
     try:
         for item in items_to_process:
             try:
-                full_image_path = f"{settings.storage_path}/{item.image_path}"
                 await redis.enqueue_job(
                     "tag_item_image",
                     str(item.id),
-                    full_image_path,
+                    item.image_path,
                     _queue_name="arq:tagging",
                 )
                 logger.info(f"Queued AI re-analysis for item {item.id}")
@@ -543,7 +537,7 @@ async def delete_item(
 
     # Delete images
     image_service = ImageService()
-    image_service.delete_images(
+    await image_service.delete_images(
         {
             "image_path": item.image_path,
             "medium_path": item.medium_path,
@@ -803,11 +797,10 @@ async def trigger_ai_analysis(
 
         redis = await create_pool(get_redis_settings())
         try:
-            full_image_path = f"{settings.storage_path}/{item.image_path}"
             job = await redis.enqueue_job(
                 "tag_item_image",
                 str(item.id),
-                full_image_path,
+                item.image_path,
                 _queue_name="arq:tagging",
             )
             logger.info(f"Queued AI re-analysis job for item {item.id}")
@@ -850,7 +843,7 @@ async def rotate_item_image(
 
     try:
         image_service = ImageService()
-        image_service.rotate_image(item.image_path, direction)
+        await image_service.rotate_image(item.image_path, direction)
         await db.commit()
         await db.refresh(item)
         return ItemResponse.model_validate(item)
@@ -907,31 +900,8 @@ async def remove_item_background(
 
     try:
         image_service = ImageService()
-
-        def _run() -> str:
-            from app.services.background_removal import get_provider
-            from PIL import Image
-
-            provider = get_provider()
-            original_full = image_service.storage_path / item.image_path
-            if not original_full.exists():
-                raise ValueError(f"Image not found: {item.image_path}")
-
-            image = Image.open(original_full).convert("RGB")
-            result = provider.remove(image)
-
-            from PIL import Image as PILImage
-            from io import BytesIO
-
-            background = PILImage.new("RGBA", result.size, (*bg_color, 255))
-            background.paste(result, mask=result.split()[3])
-            final = background.convert("RGB")
-
-            buf = BytesIO()
-            final.save(buf, format="JPEG", quality=95, optimize=True)
-            return image_service.save_temp_image(current_user.id, buf.getvalue())
-
-        temp_path = await asyncio.to_thread(_run)
+        preview = await image_service.render_background_removed(item.image_path, bg_color)
+        temp_path = await image_service.save_temp_image(current_user.id, preview)
         return EnhancePhotoResponse(
             preview_url=sign_image_url(temp_path),
             temp_path=temp_path,
@@ -997,9 +967,7 @@ async def enhance_item_photo(
             material=item.tags.get("material") if item.tags else None,
         )
         image_service = ImageService()
-        temp_path = await asyncio.to_thread(
-            image_service.save_temp_image, current_user.id, image_data
-        )
+        temp_path = await image_service.save_temp_image(current_user.id, image_data)
         return EnhancePhotoResponse(
             preview_url=sign_image_url(temp_path),
             temp_path=temp_path,
@@ -1068,9 +1036,7 @@ async def apply_enhanced_photo(
 
     if request.action == "replace":
         try:
-            await asyncio.to_thread(
-                image_service.apply_temp_image, item.image_path, request.temp_path
-            )
+            await image_service.apply_temp_image(item.image_path, request.temp_path)
         except ValueError as e:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -1092,24 +1058,22 @@ async def apply_enhanced_photo(
         current_count = count_result.scalar() or 0
         if current_count >= 4:
             # Clean up temp file and return error
-            await asyncio.to_thread(image_service.discard_temp_image, request.temp_path)
+            await image_service.discard_temp_image(request.temp_path)
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Maximum of 4 additional images per item",
             )
 
         try:
-            temp_full = image_service.storage_path / request.temp_path
-            if not temp_full.exists():
-                raise ValueError(f"Temp image not found: {request.temp_path}")
-
-            image_data = temp_full.read_bytes()
+            image_data = await image_service.read_image(
+                request.temp_path, label="Temp image"
+            )
             image_paths = await image_service.process_and_store(
                 user_id=current_user.id,
                 image_data=image_data,
                 original_filename="enhanced.jpg",
             )
-            temp_full.unlink(missing_ok=True)
+            await image_service.discard_temp_image(request.temp_path)
         except ValueError as e:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -1237,7 +1201,7 @@ async def delete_item_image(
 
     # Delete image files
     image_service_inst = ImageService()
-    image_service_inst.delete_images(
+    await image_service_inst.delete_images(
         {
             "image_path": item_image.image_path,
             "medium_path": item_image.medium_path,

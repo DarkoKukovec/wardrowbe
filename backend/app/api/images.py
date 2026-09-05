@@ -3,13 +3,13 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from fastapi.responses import FileResponse
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models import User
 from app.services.family_service import FamilyService
-from app.services.image_service import ImageService
+from app.services.storage import ObjectNotFoundError, get_storage_backend
 from app.utils.auth import get_current_user_optional
 from app.utils.signed_urls import verify_signature
 
@@ -26,7 +26,7 @@ async def get_image(
     current_user: Annotated[User | None, Depends(get_current_user_optional)] = None,
     expires: str | None = Query(None),
     sig: str | None = Query(None),
-) -> FileResponse:
+) -> StreamingResponse:
     try:
         UUID(user_id)
     except ValueError as e:
@@ -41,11 +41,11 @@ async def get_image(
             detail="Invalid filename format",
         )
 
-    path = f"{user_id}/{filename}"
+    key = f"{user_id}/{filename}"
     can_access = False
 
     if expires and sig:
-        if verify_signature(path, expires, sig):
+        if verify_signature(key, expires, sig):
             can_access = True
 
     if not can_access and current_user:
@@ -64,21 +64,6 @@ async def get_image(
             detail="Access denied",
         )
 
-    image_service = ImageService()
-    image_path = image_service.get_image_path(path)
-
-    if not image_path.resolve().is_relative_to(image_service.storage_path.resolve()):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid path",
-        )
-
-    if not image_path.exists():
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Image not found",
-        )
-
     ext = filename.rsplit(".", 1)[-1].lower()
     content_types = {
         "jpg": "image/jpeg",
@@ -88,8 +73,22 @@ async def get_image(
     }
     content_type = content_types.get(ext, "image/jpeg")
 
-    return FileResponse(
-        path=str(image_path),
+    storage = get_storage_backend()
+    try:
+        stream = await storage.open_stream(key)
+    except ObjectNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Image not found",
+        ) from e
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid path",
+        ) from e
+
+    return StreamingResponse(
+        stream,
         media_type=content_type,
         headers={
             "Cache-Control": "private, max-age=3600, must-revalidate",

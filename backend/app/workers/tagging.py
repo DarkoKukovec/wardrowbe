@@ -1,5 +1,4 @@
 import logging
-from pathlib import Path
 from typing import Any
 from uuid import UUID
 
@@ -7,6 +6,7 @@ from sqlalchemy import select
 
 from app.models.item import ClothingItem, ItemStatus
 from app.services.ai_service import AIService, ClothingTags
+from app.services.storage import ObjectNotFoundError, get_storage_backend
 from app.workers.db import get_db_session
 
 logger = logging.getLogger(__name__)
@@ -71,14 +71,14 @@ async def update_item_status_to_error(ctx: dict, item_id: str, error_msg: str) -
         logger.error(f"Failed to update item {item_id} status to error: {e}")
 
 
-async def tag_item_image(ctx: dict, item_id: str, image_path: str) -> dict[str, Any]:
+async def tag_item_image(ctx: dict, item_id: str, image_key: str) -> dict[str, Any]:
     """
     Analyze an item's image and update it with AI-generated tags.
 
     Args:
         ctx: arq context
         item_id: UUID of the item to tag
-        image_path: Path to the image file
+        image_key: Relative storage key of the image (e.g. "{user_id}/{filename}")
 
     Returns:
         Dict with status and tags
@@ -86,10 +86,12 @@ async def tag_item_image(ctx: dict, item_id: str, image_path: str) -> dict[str, 
     logger.info(f"Starting AI tagging for item {item_id}")
 
     try:
-        # Verify image exists
-        path = Path(image_path)
-        if not path.exists():
-            error_msg = f"Image not found: {image_path}"
+        # Fetch the image bytes; a missing object is a hard error, not a skip.
+        storage = get_storage_backend()
+        try:
+            image_data = await storage.get(image_key)
+        except ObjectNotFoundError:
+            error_msg = f"Image not found: {image_key}"
             logger.error(error_msg)
             await update_item_status_to_error(ctx, item_id, error_msg)
             return {"status": "error", "error": "Image not found"}
@@ -119,7 +121,7 @@ async def tag_item_image(ctx: dict, item_id: str, image_path: str) -> dict[str, 
 
         # Analyze with AI (uses custom endpoints if available)
         ai_service = AIService(endpoints=ai_endpoints)
-        tags = await ai_service.analyze_image(path)
+        tags = await ai_service.analyze_image(image_data)
 
         logger.info(
             f"AI analysis complete for item {item_id}: type={tags.type}, color={tags.primary_color}"
