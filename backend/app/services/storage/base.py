@@ -81,5 +81,10 @@ class StorageBackend(ABC):
     async def copy(self, src_key: str, dst_key: str) -> None:
         """Copy *src_key* to *dst_key*. Raises ObjectNotFoundError if the source is absent."""
 
-    async def close(self) -> None:
-        """Release any held resources. Backends without state need not override."""
+    async def close(self) -> None:  # noqa: B027 - deliberately concrete
+        """
+        Release any held resources.
+
+        Not abstract: a backend without connections (the filesystem one) has
+        nothing to close, and callers always get a working no-op.
+        """
