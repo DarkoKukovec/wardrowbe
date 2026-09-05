@@ -151,19 +151,19 @@ def _create_item_images(storage_path: Path, user_id, filename_base: str) -> Clot
 
 
 class TestImageServiceTempHelpers:
-    def test_save_temp_image(self, tmp_path):
+    async def test_save_temp_image(self, tmp_path):
         svc = ImageService(storage_path=str(tmp_path))
         user_id = uuid4()
         data = _make_jpeg_bytes()
 
-        rel_path = svc.save_temp_image(user_id, data)
+        rel_path = await svc.save_temp_image(user_id, data)
         assert rel_path.startswith(f"{user_id}/temp_")
         assert rel_path.endswith(".jpg")
         full = tmp_path / rel_path
         assert full.exists()
         assert full.read_bytes() == data
 
-    def test_apply_temp_image_replaces_and_deletes_temp(self, tmp_path):
+    async def test_apply_temp_image_replaces_and_deletes_temp(self, tmp_path):
         svc = ImageService(storage_path=str(tmp_path))
         user_id = uuid4()
         base = "20240101_120000_abc12345"
@@ -174,9 +174,9 @@ class TestImageServiceTempHelpers:
 
         # Save a different-coloured temp image
         temp_data = _make_jpeg_bytes(color=(10, 20, 30))
-        temp_path = svc.save_temp_image(user_id, temp_data)
+        temp_path = await svc.save_temp_image(user_id, temp_data)
 
-        result = svc.apply_temp_image(image_path, temp_path)
+        result = await svc.apply_temp_image(image_path, temp_path)
 
         # Temp file removed
         assert not (tmp_path / temp_path).exists()
@@ -186,16 +186,16 @@ class TestImageServiceTempHelpers:
         original_full = tmp_path / image_path
         assert original_full.exists()
 
-    def test_apply_temp_image_missing_temp(self, tmp_path):
+    async def test_apply_temp_image_missing_temp(self, tmp_path):
         svc = ImageService(storage_path=str(tmp_path))
         user_id = uuid4()
         base = "20240101_120000_abc12345"
         _create_item_images(tmp_path, user_id, base)
 
         with pytest.raises(ValueError, match="Temp image not found"):
-            svc.apply_temp_image(f"{user_id}/{base}.jpg", f"{user_id}/temp_nonexistent.jpg")
+            await svc.apply_temp_image(f"{user_id}/{base}.jpg", f"{user_id}/temp_nonexistent.jpg")
 
-    def test_apply_temp_image_missing_original(self, tmp_path):
+    async def test_apply_temp_image_missing_original(self, tmp_path):
         svc = ImageService(storage_path=str(tmp_path))
         user_id = uuid4()
         user_dir = tmp_path / str(user_id)
@@ -203,23 +203,23 @@ class TestImageServiceTempHelpers:
 
         # Only create temp, NOT the item image
         temp_data = _make_jpeg_bytes()
-        temp_path = svc.save_temp_image(user_id, temp_data)
+        temp_path = await svc.save_temp_image(user_id, temp_data)
 
         with pytest.raises(ValueError, match="Item image not found"):
-            svc.apply_temp_image(f"{user_id}/missing.jpg", temp_path)
+            await svc.apply_temp_image(f"{user_id}/missing.jpg", temp_path)
 
-    def test_discard_temp_image(self, tmp_path):
+    async def test_discard_temp_image(self, tmp_path):
         svc = ImageService(storage_path=str(tmp_path))
         user_id = uuid4()
-        temp_path = svc.save_temp_image(user_id, _make_jpeg_bytes())
+        temp_path = await svc.save_temp_image(user_id, _make_jpeg_bytes())
 
-        svc.discard_temp_image(temp_path)
+        await svc.discard_temp_image(temp_path)
         assert not (tmp_path / temp_path).exists()
 
-    def test_discard_temp_image_missing_is_silent(self, tmp_path):
+    async def test_discard_temp_image_missing_is_silent(self, tmp_path):
         svc = ImageService(storage_path=str(tmp_path))
         # Should not raise
-        svc.discard_temp_image(f"{uuid4()}/temp_nonexistent.jpg")
+        await svc.discard_temp_image(f"{uuid4()}/temp_nonexistent.jpg")
 
 
 # ---------------------------------------------------------------------------
@@ -405,7 +405,7 @@ class TestApplyEnhancedPhotoEndpoint:
 
         # Pre-create a temp file
         svc = ImageService(storage_path=str(storage_path))
-        temp_path = svc.save_temp_image(test_user.id, _make_jpeg_bytes(color=(5, 10, 15)))
+        temp_path = await svc.save_temp_image(test_user.id, _make_jpeg_bytes(color=(5, 10, 15)))
 
         item = ClothingItem(
             user_id=test_user.id,
@@ -438,7 +438,7 @@ class TestApplyEnhancedPhotoEndpoint:
         _create_item_images(storage_path, test_user.id, base)
 
         svc = ImageService(storage_path=str(storage_path))
-        temp_path = svc.save_temp_image(test_user.id, _make_jpeg_bytes(color=(20, 30, 40)))
+        temp_path = await svc.save_temp_image(test_user.id, _make_jpeg_bytes(color=(20, 30, 40)))
 
         item = ClothingItem(
             user_id=test_user.id,
@@ -468,7 +468,7 @@ class TestApplyEnhancedPhotoEndpoint:
         _create_item_images(storage_path, test_user.id, base)
 
         svc = ImageService(storage_path=str(storage_path))
-        temp_path = svc.save_temp_image(test_user.id, _make_jpeg_bytes(color=(50, 60, 70)))
+        temp_path = await svc.save_temp_image(test_user.id, _make_jpeg_bytes(color=(50, 60, 70)))
 
         item = ClothingItem(
             user_id=test_user.id,
